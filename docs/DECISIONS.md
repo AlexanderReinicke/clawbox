@@ -128,3 +128,15 @@
 - Consequence:
   - the in-app Files tab now covers the primary day-to-day file operations end-to-end.
   - operation safety is improved by confirmation on delete and deterministic API boundaries in the manager.
+
+## D-013: Add sidebar hierarchy search as default scaling affordance
+
+- Status: accepted
+- Context: once agent/sub-agent counts grow, scanning the full sidebar tree slows down routine navigation.
+- Decision:
+  - add a persistent sidebar search field in the orchestration shell
+  - filter parent agents by name/container ID and nested sub-agents by name/ID
+  - keep the interaction lightweight (clear button + inline empty state), without changing selected context automatically.
+- Consequence:
+  - navigation remains usable for larger setups without introducing new modal flows.
+  - hierarchy visibility is user-controlled and reversible with one click.

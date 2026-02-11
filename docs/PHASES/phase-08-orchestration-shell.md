@@ -34,6 +34,10 @@ Deliver the first concrete implementation pass of the ClawNode orchestration she
   - project tabs: Home, Dashboard, Settings, Logs
   - agent tabs: Home, Shell, Files, Dashboard, Config, Logs
 - Added breadcrumb path updates driven by current selection and tab.
+- Added sidebar search/filter for agent hierarchy:
+  - filters by agent display name
+  - filters by container name
+  - filters by nested sub-agent name/ID
 
 ### 2.7 Sub-agent hierarchy (logical model, UI-integrated)
 

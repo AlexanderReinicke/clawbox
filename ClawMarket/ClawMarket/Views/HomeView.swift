@@ -104,6 +104,7 @@ struct HomeView: View {
     @State private var editingSubAgentID: String?
     @State private var editingSubAgentDraft = ""
     @State private var projectExpanded = true
+    @State private var sidebarSearchQuery = ""
 
     @State private var filesCurrentPath: String
     @State private var filesSelectedPath: String?
@@ -498,6 +499,36 @@ struct HomeView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
 
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.shellTextMuted)
+
+                TextField("Search agents", text: $sidebarSearchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.shellTextPrimary)
+
+                if !sidebarSearchQuery.isEmpty {
+                    Button {
+                        sidebarSearchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.shellTextMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.shellSurface)
+            )
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
+
             divider
 
             ScrollView {
@@ -506,8 +537,17 @@ struct HomeView: View {
 
                     if projectExpanded {
                         VStack(spacing: 6) {
-                            ForEach(agents) { agent in
+                            ForEach(filteredAgents) { agent in
                                 agentSidebarRow(agent)
+                            }
+
+                            if filteredAgents.isEmpty {
+                                Text("No matching agents")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundStyle(Color.shellTextMuted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 8)
                             }
                         }
                         .padding(.leading, 10)
@@ -562,7 +602,7 @@ struct HomeView: View {
         case .project:
             isSelected = false
         }
-        let subAgents = subAgents(for: agent.slot)
+        let subAgents = filteredSubAgents(for: agent.slot)
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 8) {
@@ -1756,8 +1796,47 @@ struct HomeView: View {
         subAgentsByAgentSlot.values.reduce(0) { $0 + $1.count }
     }
 
+    private var normalizedSidebarSearchQuery: String {
+        sidebarSearchQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private var filteredAgents: [AgentListItem] {
+        let query = normalizedSidebarSearchQuery
+        guard !query.isEmpty else {
+            return agents
+        }
+
+        return agents.filter { agent in
+            if agent.displayName.lowercased().contains(query) {
+                return true
+            }
+            if agent.containerName.lowercased().contains(query) {
+                return true
+            }
+            return subAgents(for: agent.slot).contains { subAgent in
+                subAgent.displayName.lowercased().contains(query) ||
+                    subAgent.id.lowercased().contains(query)
+            }
+        }
+    }
+
     private func subAgents(for slot: Int) -> [SubAgentListItem] {
         subAgentsByAgentSlot[slot] ?? []
+    }
+
+    private func filteredSubAgents(for slot: Int) -> [SubAgentListItem] {
+        let all = subAgents(for: slot)
+        let query = normalizedSidebarSearchQuery
+        guard !query.isEmpty else {
+            return all
+        }
+
+        return all.filter { subAgent in
+            subAgent.displayName.lowercased().contains(query) ||
+                subAgent.id.lowercased().contains(query)
+        }
     }
 
     private func snapshot(for slot: Int) -> AgentRuntimeSnapshot? {

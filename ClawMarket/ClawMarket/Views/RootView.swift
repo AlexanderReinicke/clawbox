@@ -4,6 +4,8 @@ struct RootView: View {
     @AppStorage("clawmarket.hasSeenWelcome") private var hasSeenWelcome = false
     @State private var manager = AgentManager()
     @State private var runtimeInstallStatus: RuntimeInstallStatus = .idle
+    @State private var setupProgressState: SetupProgressState?
+    @State private var isLaunchingTemplate = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -13,6 +15,15 @@ struct RootView: View {
                     hasSeenWelcome = true
                     Task { await manager.sync() }
                 }
+            } else if manager.state == .noRuntime {
+                RuntimeInstallView(
+                    status: runtimeInstallStatus,
+                    onInstallNow: installRuntime,
+                    onInstallManually: openManualInstallPage,
+                    onCheckAgain: checkRuntimeAgain
+                )
+            } else if let setupProgressState {
+                SetupProgressView(state: setupProgressState, onRetry: runTemplateSetup)
             } else {
                 switch manager.state {
                 case .checking:
@@ -25,7 +36,10 @@ struct RootView: View {
                         onCheckAgain: checkRuntimeAgain
                     )
                 case .needsImage, .needsContainer:
-                    TemplateSelectionView()
+                    TemplateSelectionView(
+                        onLaunch: runTemplateSetup,
+                        isLaunching: isLaunchingTemplate
+                    )
                 case .stopped, .starting, .running:
                     HomeView()
                 case let .error(message):
@@ -85,6 +99,36 @@ struct RootView: View {
 
     private func openManualInstallPage() {
         openURL(URL(string: "https://github.com/apple/container/releases")!)
+    }
+
+    private func runTemplateSetup() {
+        guard !isLaunchingTemplate else {
+            return
+        }
+
+        isLaunchingTemplate = true
+        setupProgressState = .working("Building environment...")
+
+        Task {
+            do {
+                if manager.state == .needsImage {
+                    try await manager.buildImage()
+                }
+
+                setupProgressState = .working("Creating your agent...")
+                try await manager.createContainer()
+
+                setupProgressState = .working("Starting up...")
+                try await manager.startContainer()
+
+                await manager.sync()
+                setupProgressState = nil
+                isLaunchingTemplate = false
+            } catch {
+                setupProgressState = .failed(error.localizedDescription)
+                isLaunchingTemplate = false
+            }
+        }
     }
 }
 

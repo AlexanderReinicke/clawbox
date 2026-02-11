@@ -26,7 +26,7 @@ Added repeatable packaging and release documentation.
 
 - Packaging scripts are executable and ready for use.
 - DMG creation path verified against local debug app bundle:
-  - output: `/tmp/ClawMarket-debug.dmg`
+  - output: `/tmp/ClawMarket-debug-direct.dmg`
 
 ## Files
 

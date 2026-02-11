@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var setupProgressState: SetupProgressState?
     @State private var isLaunchingTemplate = false
     @State private var showingTerminal = false
+    @State private var showingFiles = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -48,6 +49,7 @@ struct RootView: View {
                         onStart: startAgent,
                         onStop: stopAgent,
                         onOpenTerminal: { showingTerminal = true },
+                        onOpenFiles: { showingFiles = true },
                         onRefresh: { Task { await manager.sync() } }
                     )
                 case let .error(message):
@@ -79,6 +81,12 @@ struct RootView: View {
                 showingTerminal = false
             }
             .frame(minWidth: 920, minHeight: 600)
+        }
+        .sheet(isPresented: $showingFiles) {
+            FileBrowserScreen(manager: manager) {
+                showingFiles = false
+            }
+            .frame(minWidth: 920, minHeight: 620)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await manager.sync() }

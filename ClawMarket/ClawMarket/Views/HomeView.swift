@@ -5,6 +5,7 @@ struct HomeView: View {
     let onStart: () -> Void
     let onStop: () -> Void
     let onOpenTerminal: () -> Void
+    let onOpenFiles: () -> Void
     let onRefresh: () -> Void
 
     @State private var showStopConfirmation = false
@@ -50,6 +51,10 @@ struct HomeView: View {
                     HStack(spacing: 10) {
                         Button("Open Terminal", action: onOpenTerminal)
                             .buttonStyle(.borderedProminent)
+                            .disabled(state != .running)
+
+                        Button("Open Files", action: onOpenFiles)
+                            .buttonStyle(.bordered)
                             .disabled(state != .running)
 
                         if state == .running {
@@ -118,6 +123,7 @@ struct HomeView: View {
         onStart: {},
         onStop: {},
         onOpenTerminal: {},
+        onOpenFiles: {},
         onRefresh: {}
     )
 }

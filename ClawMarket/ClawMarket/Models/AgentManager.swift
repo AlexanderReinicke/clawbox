@@ -20,6 +20,7 @@ enum AgentManagerError: LocalizedError {
     case commandTimeout(command: String, seconds: TimeInterval)
     case missingDockerfile
     case imageBuildFailed(String)
+    case invalidDirectoryListing(String)
 
     var errorDescription: String? {
         switch self {
@@ -38,8 +39,33 @@ enum AgentManagerError: LocalizedError {
             return "Could not find Dockerfile in app bundle."
         case let .imageBuildFailed(message):
             return "Failed to build default image.\n\(message)"
+        case let .invalidDirectoryListing(message):
+            return "Failed to read agent filesystem.\n\(message)"
         }
     }
+}
+
+enum AgentFileType: String, Codable {
+    case directory
+    case file
+    case symlink
+    case other
+}
+
+struct AgentFileEntry: Identifiable, Hashable, Codable {
+    let name: String
+    let path: String
+    let kind: AgentFileType
+    let size: Int64
+    let modified: TimeInterval
+
+    var id: String { path }
+    var isDirectory: Bool { kind == .directory }
+}
+
+struct AgentDirectoryListing: Codable {
+    let path: String
+    let entries: [AgentFileEntry]
 }
 
 @MainActor
@@ -50,6 +76,7 @@ final class AgentManager {
     let imageName = "clawmarket/default"
     let containerName = "claw-agent-1"
     let containerMemory = "4096M"
+    let defaultBrowsePath = "/home/agent"
     let runtimeInstallerURL = URL(string: "https://github.com/apple/container/releases/download/0.9.0/container-installer-signed.pkg")!
     let logMaxBytes = 1_000_000
 
@@ -240,6 +267,82 @@ final class AgentManager {
         try await deleteContainer()
         try await deleteImage()
         state = .needsImage
+    }
+
+    func listDirectory(path: String) async throws -> AgentDirectoryListing {
+        guard await checkRuntime() else {
+            throw AgentManagerError.runtimeMissing
+        }
+        guard try await containerIsRunning() else {
+            throw AgentManagerError.commandFailed(
+                command: "container exec",
+                exitCode: 1,
+                stderr: "Container \(containerName) is not running."
+            )
+        }
+
+        let listingScript = """
+import json, os, stat, sys
+target = sys.argv[1] if len(sys.argv) > 1 else "."
+target = os.path.abspath(os.path.expanduser(target))
+result = {"path": target, "entries": []}
+try:
+    names = os.listdir(target)
+except Exception as exc:
+    print(json.dumps({"error": str(exc), "path": target}))
+    raise SystemExit(0)
+
+for name in names:
+    full_path = os.path.join(target, name)
+    try:
+        st = os.lstat(full_path)
+    except Exception:
+        continue
+
+    mode = st.st_mode
+    if stat.S_ISDIR(mode):
+        kind = "directory"
+    elif stat.S_ISREG(mode):
+        kind = "file"
+    elif stat.S_ISLNK(mode):
+        kind = "symlink"
+    else:
+        kind = "other"
+
+    result["entries"].append({
+        "name": name,
+        "path": full_path,
+        "kind": kind,
+        "size": int(st.st_size),
+        "modified": float(st.st_mtime),
+    })
+
+result["entries"].sort(key=lambda item: (item["kind"] != "directory", item["name"].lower()))
+print(json.dumps(result))
+"""
+
+        let output = try await shell(
+            ["exec", containerName, "python3", "-c", listingScript, path],
+            timeout: 120
+        )
+
+        let data = Data(output.utf8)
+        let decoder = JSONDecoder()
+
+        struct ListingError: Decodable {
+            let error: String
+            let path: String
+        }
+
+        if let listingError = try? decoder.decode(ListingError.self, from: data) {
+            throw AgentManagerError.invalidDirectoryListing("\(listingError.path): \(listingError.error)")
+        }
+
+        do {
+            return try decoder.decode(AgentDirectoryListing.self, from: data)
+        } catch {
+            throw AgentManagerError.invalidDirectoryListing("Unexpected listing output for path \(path).")
+        }
     }
 
     func resetError() {

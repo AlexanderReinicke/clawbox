@@ -2,14 +2,18 @@ import SwiftUI
 
 struct HomeView: View {
     let state: AgentState
+    let accessFolderDisplayPath: String?
     let onStart: () -> Void
     let onStop: () -> Void
     let onOpenTerminal: () -> Void
     let onOpenFiles: () -> Void
     let onOpenDashboard: () -> Void
+    let onSelectAccessFolder: () -> Void
+    let onRecreateAgent: () -> Void
     let onRefresh: () -> Void
 
     @State private var showStopConfirmation = false
+    @State private var showRecreateConfirmation = false
 
     var body: some View {
         ZStack {
@@ -73,6 +77,34 @@ struct HomeView: View {
                                 .disabled(state == .starting)
                         }
                     }
+
+                    HStack(spacing: 10) {
+                        Button("Select Access Folder", action: onSelectAccessFolder)
+                            .buttonStyle(.bordered)
+                            .disabled(state == .starting)
+
+                        Button("Recreate Agent") {
+                            showRecreateConfirmation = true
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(state == .starting)
+                    }
+
+                    if let accessFolderDisplayPath {
+                        Text("Access folder: \(accessFolderDisplayPath)")
+                            .font(.system(size: 13, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .textSelection(.enabled)
+                    } else {
+                        Text("Access folder: not selected")
+                            .font(.system(size: 13, weight: .regular, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text("Folder access uses a bind mount. This can only be added when the agent container is created, so changing it requires Recreate Agent.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
                 }
                 .padding(18)
                 .frame(maxWidth: 760, alignment: .leading)
@@ -92,6 +124,12 @@ struct HomeView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your agent will stop. Files and installed packages remain saved.")
+        }
+        .alert("Recreate agent?", isPresented: $showRecreateConfirmation) {
+            Button("Recreate", role: .destructive) { onRecreateAgent() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will delete the current agent container and create a fresh one. Folder access mount is applied at creation time only.")
         }
     }
 
@@ -125,11 +163,14 @@ struct HomeView: View {
 #Preview {
     HomeView(
         state: .running,
+        accessFolderDisplayPath: "/Users/example/Documents/OpenClaw",
         onStart: {},
         onStop: {},
         onOpenTerminal: {},
         onOpenFiles: {},
         onOpenDashboard: {},
+        onSelectAccessFolder: {},
+        onRecreateAgent: {},
         onRefresh: {}
     )
 }

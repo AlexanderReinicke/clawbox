@@ -24,6 +24,12 @@ Expected: `apiserver is running`.
 4. Open embedded terminal and run `whoami`, `pwd`, `openclaw --version`.
 5. Stop/start container and verify persistence.
 
+## Access folder mount behavior
+
+- Host folder access is provided via bind mount to `/mnt/access`.
+- Mounts are applied only when creating the container.
+- If you change the selected host folder later, recreate the agent container from the app so the new mount is applied.
+
 ## Common failures
 
 - Runtime not installed:

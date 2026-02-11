@@ -102,6 +102,7 @@ final class AgentManager {
     let imageName = "clawmarket/default"
     let containerName = "claw-agent-1"
     let containerMemory = "4096M"
+    let containerAccessMountPath = "/mnt/access"
     let defaultBrowsePath = "/home/agent"
     let dashboardPort = 18789
     let dashboardLocalHost = "127.0.0.1"
@@ -210,24 +211,28 @@ final class AgentManager {
         return listOutput(output, containsName: containerName)
     }
 
-    func createContainer() async throws {
+    func createContainer(accessFolderHostPath: String? = nil) async throws {
         guard await checkRuntime() else {
             throw AgentManagerError.runtimeMissing
         }
         if try await containerExists() {
             return
         }
-        _ = try await shell(
+
+        var args = [
             "create",
             "--name", containerName,
             "-m", containerMemory,
-            "-p", "\(dashboardLocalHost):\(dashboardPort):\(dashboardPort)",
-            imageTag,
-            "sleep", "infinity"
-        )
+            "-p", "\(dashboardLocalHost):\(dashboardPort):\(dashboardPort)"
+        ]
+        if let hostPath = normalizedAccessFolderHostPath(accessFolderHostPath) {
+            args += ["-v", "\(hostPath):\(containerAccessMountPath)"]
+        }
+        args += [imageTag, "sleep", "infinity"]
+        _ = try await shell(args)
     }
 
-    func startContainer() async throws {
+    func startContainer(accessFolderHostPath: String? = nil) async throws {
         guard await checkRuntime() else {
             throw AgentManagerError.runtimeMissing
         }
@@ -236,7 +241,7 @@ final class AgentManager {
             return
         }
         if try await !containerExists() {
-            try await createContainer()
+            try await createContainer(accessFolderHostPath: accessFolderHostPath)
         }
 
         state = .starting
@@ -251,6 +256,22 @@ final class AgentManager {
                 throw error
             }
         }
+    }
+
+    func recreateContainer(accessFolderHostPath: String? = nil) async throws {
+        guard await checkRuntime() else {
+            throw AgentManagerError.runtimeMissing
+        }
+
+        if try await containerIsRunning() {
+            _ = try await shell("stop", containerName)
+        }
+        if try await containerExists() {
+            _ = try await shell("rm", containerName)
+        }
+
+        try await createContainer(accessFolderHostPath: accessFolderHostPath)
+        try await startContainer(accessFolderHostPath: accessFolderHostPath)
     }
 
     func stopContainer() async throws {
@@ -840,6 +861,17 @@ echo "configured"
             return developmentDockerfile
         }
         return nil
+    }
+
+    private func normalizedAccessFolderHostPath(_ path: String?) -> String? {
+        guard let path else {
+            return nil
+        }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 
     private var logDirectoryURL: URL {

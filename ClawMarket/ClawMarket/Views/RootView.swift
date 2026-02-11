@@ -3,6 +3,7 @@ import AppKit
 
 struct RootView: View {
     @AppStorage("clawmarket.hasSeenWelcome") private var hasSeenWelcome = false
+    @AppStorage("clawmarket.accessFolderPath") private var accessFolderPath = ""
     @State private var manager = AgentManager()
     @State private var runtimeInstallStatus: RuntimeInstallStatus = .idle
     @State private var setupProgressState: SetupProgressState?
@@ -46,11 +47,14 @@ struct RootView: View {
                 case .stopped, .starting, .running:
                     HomeView(
                         state: manager.state,
+                        accessFolderDisplayPath: normalizedAccessFolderPath,
                         onStart: startAgent,
                         onStop: stopAgent,
                         onOpenTerminal: openTerminalWindow,
                         onOpenFiles: openFilesWindow,
                         onOpenDashboard: openDashboard,
+                        onSelectAccessFolder: selectAccessFolder,
+                        onRecreateAgent: recreateAgent,
                         onRefresh: { Task { await manager.sync() } }
                     )
                 case let .error(message):
@@ -143,10 +147,10 @@ struct RootView: View {
                 }
 
                 setupProgressState = .working("Creating your agent...")
-                try await manager.createContainer()
+                try await manager.createContainer(accessFolderHostPath: normalizedAccessFolderPath)
 
                 setupProgressState = .working("Starting up...")
-                try await manager.startContainer()
+                try await manager.startContainer(accessFolderHostPath: normalizedAccessFolderPath)
 
                 await manager.sync()
                 setupProgressState = nil
@@ -161,7 +165,7 @@ struct RootView: View {
     private func startAgent() {
         Task {
             do {
-                try await manager.startContainer()
+                try await manager.startContainer(accessFolderHostPath: normalizedAccessFolderPath)
                 await manager.sync()
             } catch {
                 manager.state = .error(error.localizedDescription)
@@ -275,6 +279,51 @@ struct RootView: View {
                 await MainActor.run {
                     manager.state = .error(error.localizedDescription)
                 }
+            }
+        }
+    }
+
+    private var normalizedAccessFolderPath: String? {
+        let trimmed = accessFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func selectAccessFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Access Folder"
+        panel.prompt = "Select Folder"
+        panel.message = "This folder will be mounted into the agent at /mnt/access after recreating the agent."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+        panel.canCreateDirectories = true
+
+        if panel.runModal() == .OK, let selectedURL = panel.url {
+            accessFolderPath = selectedURL.path
+        }
+    }
+
+    private func recreateAgent() {
+        guard normalizedAccessFolderPath != nil else {
+            manager.state = .error(
+                """
+                Select an access folder first.
+                Use "Select Access Folder", then run "Recreate Agent". Folder mounts are applied only at container creation time.
+                """
+            )
+            return
+        }
+
+        setupProgressState = .working("Recreating your agent...")
+        Task {
+            do {
+                try await manager.recreateContainer(accessFolderHostPath: normalizedAccessFolderPath)
+                await manager.sync()
+                setupProgressState = nil
+            } catch {
+                setupProgressState = nil
+                manager.state = .error("Recreate failed: \(error.localizedDescription)")
             }
         }
     }

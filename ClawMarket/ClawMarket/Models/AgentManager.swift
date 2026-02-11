@@ -113,7 +113,6 @@ final class AgentManager {
     var lastCommandOutput: String = ""
     var lastErrorMessage: String?
     private var hasEnsuredGatewayForCurrentRun = false
-    private var lastGatewaySignature: String?
 
     init(autoSync: Bool = true) {
         prepareLogging()
@@ -151,7 +150,6 @@ final class AgentManager {
                 }
             } else {
                 hasEnsuredGatewayForCurrentRun = false
-                lastGatewaySignature = nil
             }
         } catch {
             setError(error)
@@ -306,7 +304,6 @@ final class AgentManager {
         _ = try await shell("stop", containerName)
         state = .stopped
         hasEnsuredGatewayForCurrentRun = false
-        lastGatewaySignature = nil
     }
 
     func deleteContainer() async throws {
@@ -321,7 +318,6 @@ final class AgentManager {
         }
         state = .needsContainer
         hasEnsuredGatewayForCurrentRun = false
-        lastGatewaySignature = nil
     }
 
     func deleteImage() async throws {
@@ -584,54 +580,21 @@ print(target)
     }
 
     private func ensureDashboardGatewayRunning() async throws {
-        let signature = try await currentGatewaySignature()
-        let shouldRestartRunningGateway = lastGatewaySignature != signature
-        let restartFlag = shouldRestartRunningGateway ? "1" : "0"
-
         let startGatewayScript = """
-restart_needed="\(restartFlag)"
-
-openai_key="$(python3 - <<'PY'
-from pathlib import Path
-env_path = Path('/home/agent/.openclaw/.env')
-if env_path.exists():
-    for line in env_path.read_text().splitlines():
-        if line.startswith('OPENAI_API_KEY='):
-            print(line.split('=', 1)[1].strip())
-            break
-PY
-)"
-
-gateway_up=0
 if curl -fsS --max-time 2 http://127.0.0.1:18789/ >/dev/null 2>&1; then
-  gateway_up=1
-fi
-
-if [ "$gateway_up" = "1" ] && [ "$restart_needed" = "1" ]; then
-  for pid in $(pgrep -x openclaw-gateway 2>/dev/null || true); do
-    kill "$pid" >/dev/null 2>&1 || true
-  done
-  sleep 1
-  gateway_up=0
-fi
-
-if [ "$gateway_up" = "0" ]; then
+  echo "running"
+else
   export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=768}"
-  if [ -n "$openai_key" ]; then
-    export OPENAI_API_KEY="$openai_key"
-  fi
   nohup openclaw gateway --bind lan >/tmp/openclaw-gateway.log 2>&1 &
+  for _ in 1 2 3 4 5; do
+    sleep 1
+    if curl -fsS --max-time 2 http://127.0.0.1:18789/ >/dev/null 2>&1; then
+      echo "started"
+      exit 0
+    fi
+  done
+  echo "failed"
 fi
-
-for _ in 1 2 3 4 5 6; do
-  sleep 1
-  if curl -fsS --max-time 2 http://127.0.0.1:18789/ >/dev/null 2>&1; then
-    echo "ready"
-    exit 0
-  fi
-done
-
-echo "failed"
 """
 
         let output = try await shell(
@@ -644,50 +607,6 @@ echo "failed"
                 "Could not start gateway inside container. Check /tmp/openclaw-gateway.log in the agent."
             )
         }
-
-        lastGatewaySignature = signature
-    }
-
-    private func currentGatewaySignature() async throws -> String {
-        let signatureScript = """
-mode="$(openclaw config get gateway.mode 2>/dev/null || true)"
-auth_token="$(openclaw config get gateway.auth.token 2>/dev/null || true)"
-remote_token="$(openclaw config get gateway.remote.token 2>/dev/null || true)"
-allow_insecure="$(openclaw config get gateway.controlUi.allowInsecureAuth 2>/dev/null || true)"
-disable_device_auth="$(openclaw config get gateway.controlUi.dangerouslyDisableDeviceAuth 2>/dev/null || true)"
-
-openai_hash="$(python3 - <<'PY'
-import hashlib
-from pathlib import Path
-key = ''
-env_path = Path('/home/agent/.openclaw/.env')
-if env_path.exists():
-    for line in env_path.read_text().splitlines():
-        if line.startswith('OPENAI_API_KEY='):
-            key = line.split('=', 1)[1].strip()
-            break
-print(hashlib.sha256(key.encode()).hexdigest()[:16] if key else 'none')
-PY
-)"
-
-auth_store_hash="$(python3 - <<'PY'
-import hashlib
-from pathlib import Path
-store = Path('/home/agent/.openclaw/agents/main/agent/auth-profiles.json')
-if store.exists():
-    print(hashlib.sha256(store.read_bytes()).hexdigest()[:16])
-else:
-    print('missing')
-PY
-)"
-
-echo "${mode}|${auth_token}|${remote_token}|${allow_insecure}|${disable_device_auth}|${openai_hash}|${auth_store_hash}"
-"""
-
-        return try await shell(
-            ["exec", containerName, "/bin/bash", "-lc", signatureScript],
-            timeout: 60
-        )
     }
 
     private func configureDashboardControlUIAccess() async throws {

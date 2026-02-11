@@ -50,6 +50,7 @@ struct RootView: View {
                         onStop: stopAgent,
                         onOpenTerminal: openTerminalWindow,
                         onOpenFiles: openFilesWindow,
+                        onOpenDashboard: openDashboard,
                         onRefresh: { Task { await manager.sync() } }
                     )
                 case let .error(message):
@@ -261,6 +262,21 @@ struct RootView: View {
         filesWindowController = controller
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openDashboard() {
+        Task {
+            do {
+                let url = try await manager.dashboardURL()
+                await MainActor.run {
+                    openURL(url)
+                }
+            } catch {
+                await MainActor.run {
+                    manager.state = .error(error.localizedDescription)
+                }
+            }
+        }
     }
 }
 

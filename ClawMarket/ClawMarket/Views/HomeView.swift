@@ -6,6 +6,7 @@ struct HomeView: View {
     let onStop: () -> Void
     let onOpenTerminal: () -> Void
     let onOpenFiles: () -> Void
+    let onOpenDashboard: () -> Void
     let onRefresh: () -> Void
 
     @State private var showStopConfirmation = false
@@ -54,6 +55,10 @@ struct HomeView: View {
                             .disabled(state != .running)
 
                         Button("Open Files", action: onOpenFiles)
+                            .buttonStyle(.bordered)
+                            .disabled(state != .running)
+
+                        Button("Open Dashboard", action: onOpenDashboard)
                             .buttonStyle(.bordered)
                             .disabled(state != .running)
 
@@ -124,6 +129,7 @@ struct HomeView: View {
         onStop: {},
         onOpenTerminal: {},
         onOpenFiles: {},
+        onOpenDashboard: {},
         onRefresh: {}
     )
 }

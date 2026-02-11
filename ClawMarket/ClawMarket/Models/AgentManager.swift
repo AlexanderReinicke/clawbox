@@ -23,6 +23,7 @@ enum AgentManagerError: LocalizedError {
     case invalidDirectoryListing(String)
     case invalidUploadSource(String)
     case invalidFilePreview(String)
+    case dashboardAddressUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -47,6 +48,8 @@ enum AgentManagerError: LocalizedError {
             return "File upload failed.\n\(message)"
         case let .invalidFilePreview(message):
             return "File preview failed.\n\(message)"
+        case let .dashboardAddressUnavailable(message):
+            return "Dashboard is unavailable.\n\(message)"
         }
     }
 }
@@ -95,6 +98,7 @@ final class AgentManager {
     let containerName = "claw-agent-1"
     let containerMemory = "4096M"
     let defaultBrowsePath = "/home/agent"
+    let dashboardPort = 18789
     let runtimeInstallerURL = URL(string: "https://github.com/apple/container/releases/download/0.9.0/container-installer-signed.pkg")!
     let logMaxBytes = 1_000_000
 
@@ -420,6 +424,16 @@ print(json.dumps({
         }
     }
 
+    func dashboardURL() async throws -> URL {
+        try await ensureContainerRunningForFileOperations()
+        try await ensureDashboardGatewayRunning()
+        let ipAddress = try await resolveContainerIPAddress()
+        guard let url = URL(string: "http://\(ipAddress):\(dashboardPort)") else {
+            throw AgentManagerError.dashboardAddressUnavailable("Failed to construct dashboard URL.")
+        }
+        return url
+    }
+
     private func uploadItemRecursive(from sourceURL: URL, toDirectory directoryPath: String) async throws -> AgentUploadResult {
         guard sourceURL.isFileURL else {
             throw AgentManagerError.invalidUploadSource("Only local files can be uploaded.")
@@ -510,6 +524,52 @@ print(target)
                 stderr: "Container \(containerName) is not running."
             )
         }
+    }
+
+    private func ensureDashboardGatewayRunning() async throws {
+        let startGatewayScript = """
+if pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+  echo "running"
+else
+  nohup openclaw gateway --bind lan >/tmp/openclaw-gateway.log 2>&1 &
+  sleep 1
+  pgrep -f "openclaw gateway" >/dev/null 2>&1 && echo "started" || echo "failed"
+fi
+"""
+
+        let output = try await shell(
+            ["exec", containerName, "/bin/bash", "-lc", startGatewayScript],
+            timeout: 90
+        )
+
+        if output.contains("failed") {
+            throw AgentManagerError.dashboardAddressUnavailable(
+                "Could not start gateway inside container. Check /tmp/openclaw-gateway.log in the agent."
+            )
+        }
+    }
+
+    private func resolveContainerIPAddress() async throws -> String {
+        let output = try await shell("ls", "-a")
+        let lines = output.split(whereSeparator: \.isNewline)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard
+                !trimmed.isEmpty,
+                !trimmed.hasPrefix("ID"),
+                trimmed.hasPrefix(containerName)
+            else {
+                continue
+            }
+
+            if let match = trimmed.range(of: #"\b\d{1,3}(?:\.\d{1,3}){3}\b"#, options: .regularExpression) {
+                return String(trimmed[match])
+            }
+        }
+
+        throw AgentManagerError.dashboardAddressUnavailable(
+            "Could not resolve container IP address from runtime output."
+        )
     }
 
     func resetError() {

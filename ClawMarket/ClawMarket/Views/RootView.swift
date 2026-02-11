@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @State private var manager = AgentManager()
+    @State private var showingTerminal = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -63,6 +64,12 @@ struct RootView: View {
             }
             .buttonStyle(.borderedProminent)
 
+            Button("Open Terminal") {
+                showingTerminal = true
+            }
+            .buttonStyle(.bordered)
+            .disabled(manager.state != .running)
+
             if let error = manager.lastErrorMessage {
                 GroupBox("Last Error") {
                     ScrollView {
@@ -88,6 +95,10 @@ struct RootView: View {
         .padding(24)
         .task {
             await manager.sync()
+        }
+        .sheet(isPresented: $showingTerminal) {
+            TerminalScreen(containerName: manager.containerName)
+                .frame(minWidth: 900, minHeight: 600)
         }
     }
 

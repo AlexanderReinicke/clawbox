@@ -1,0 +1,29 @@
+# Decisions (ADR-lite)
+
+## D-001: Use Debian Node base instead of Alpine
+
+- Status: accepted
+- Context: `openclaw` install/runtime failed or was unstable on Alpine due to native dependency + glibc/toolchain expectations.
+- Decision: use `node:22-bookworm-slim` and pin `openclaw@2026.2.9`.
+- Consequence: larger base image than Alpine, but stable install/runtime.
+
+## D-002: Default container memory baseline is 2 GB
+
+- Status: accepted
+- Context: low-memory containers can OOM during `openclaw` startup.
+- Decision: set `-m 2048M` for baseline; recommend `-m 4096M` for heavier workloads.
+- Consequence: higher default memory footprint but significantly better startup stability.
+
+## D-003: Build app control plane around shelling out to `container` CLI
+
+- Status: accepted
+- Context: Apple `container` CLI already encapsulates image/container lifecycle behavior we need.
+- Decision: use `Process`-based shell execution with timeout/error capture.
+- Consequence: robust CLI parsing and process lifecycle handling are critical.
+
+## D-004: Use SwiftTerm for embedded terminal
+
+- Status: accepted
+- Context: product requires interactive in-app shell with copy/paste and resize behavior.
+- Decision: integrate `SwiftTerm` (`LocalProcessTerminalView`) and attach to `container exec`.
+- Consequence: AppKit bridge required (`NSViewRepresentable`) for SwiftUI integration.

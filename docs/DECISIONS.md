@@ -27,3 +27,10 @@
 - Context: product requires interactive in-app shell with copy/paste and resize behavior.
 - Decision: integrate `SwiftTerm` (`LocalProcessTerminalView`) and attach to `container exec`.
 - Consequence: AppKit bridge required (`NSViewRepresentable`) for SwiftUI integration.
+
+## D-005: Automate runtime installation from the app
+
+- Status: accepted
+- Context: users may not have Apple `container` runtime installed.
+- Decision: add an in-app installer flow (download pkg + admin install + runtime start) with manual fallback.
+- Consequence: first-run UX is simpler, but requires robust error handling around privileged operations.

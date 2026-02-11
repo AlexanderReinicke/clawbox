@@ -1,136 +1,90 @@
 import SwiftUI
 
 struct RootView: View {
+    @AppStorage("clawmarket.hasSeenWelcome") private var hasSeenWelcome = false
     @State private var manager = AgentManager()
-    @State private var showingTerminal = false
+    @State private var runtimeInstallStatus: RuntimeInstallStatus = .idle
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("ClawMarket Engine Check")
-                .font(.title2.weight(.semibold))
-
-            Label(stateTitle, systemImage: stateIcon)
-                .foregroundStyle(stateColor)
-
-            Text("Container: \(manager.containerName)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Button("Sync") {
+        Group {
+            if !hasSeenWelcome {
+                WelcomeView {
+                    hasSeenWelcome = true
                     Task { await manager.sync() }
                 }
-                Button("Build Image") {
-                    Task {
-                        do {
-                            try await manager.buildImage()
-                            await manager.sync()
-                        } catch {
-                            manager.lastErrorMessage = error.localizedDescription
-                        }
-                    }
-                }
-                Button("Create + Start") {
-                    Task {
-                        do {
-                            try await manager.createContainer()
-                            try await manager.startContainer()
-                            await manager.sync()
-                        } catch {
-                            manager.lastErrorMessage = error.localizedDescription
-                        }
-                    }
-                }
-                Button("Stop") {
-                    Task {
-                        do {
-                            try await manager.stopContainer()
-                            await manager.sync()
-                        } catch {
-                            manager.lastErrorMessage = error.localizedDescription
-                        }
-                    }
-                }
-                Button("Delete") {
-                    Task {
-                        do {
-                            try await manager.deleteContainer()
-                            await manager.sync()
-                        } catch {
-                            manager.lastErrorMessage = error.localizedDescription
-                        }
+            } else {
+                switch manager.state {
+                case .checking:
+                    checkingView
+                case .noRuntime:
+                    RuntimeInstallView(
+                        status: runtimeInstallStatus,
+                        onInstallNow: installRuntime,
+                        onInstallManually: openManualInstallPage,
+                        onCheckAgain: checkRuntimeAgain
+                    )
+                case .needsImage, .needsContainer:
+                    TemplateSelectionView()
+                case .stopped, .starting, .running:
+                    HomeView()
+                case let .error(message):
+                    ErrorView(message: message) {
+                        runtimeInstallStatus = .idle
+                        Task { await manager.sync() }
                     }
                 }
             }
-            .buttonStyle(.borderedProminent)
-
-            Button("Open Terminal") {
-                showingTerminal = true
-            }
-            .buttonStyle(.bordered)
-            .disabled(manager.state != .running)
-
-            if let error = manager.lastErrorMessage {
-                GroupBox("Last Error") {
-                    ScrollView {
-                        Text(error)
-                            .font(.system(size: 12, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 120)
-                }
-            }
-
-            GroupBox("Last Command Output") {
-                ScrollView {
-                    Text(manager.lastCommandOutput.isEmpty ? "No command output yet." : manager.lastCommandOutput)
-                        .font(.system(size: 12, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 180)
-            }
-
-            Spacer()
         }
-        .padding(24)
         .task {
             await manager.sync()
         }
-        .sheet(isPresented: $showingTerminal) {
-            TerminalScreen(containerName: manager.containerName)
-                .frame(minWidth: 900, minHeight: 600)
+        .animation(.easeInOut(duration: 0.2), value: hasSeenWelcome)
+        .animation(.easeInOut(duration: 0.2), value: manager.state)
+    }
+
+    private var checkingView: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Checking container runtime...")
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(red: 0.95, green: 0.97, blue: 0.99))
+    }
+
+    private func installRuntime() {
+        Task {
+            runtimeInstallStatus = .working("Preparing runtime installation...")
+            do {
+                try await manager.installRuntime { status in
+                    runtimeInstallStatus = .working(status)
+                }
+                runtimeInstallStatus = .working("Verifying runtime...")
+                await manager.sync()
+                runtimeInstallStatus = .idle
+            } catch {
+                runtimeInstallStatus = .failed(error.localizedDescription)
+            }
         }
     }
 
-    private var stateTitle: String {
-        switch manager.state {
-        case .checking: return "Checking runtime"
-        case .noRuntime: return "Container runtime missing"
-        case .needsImage: return "Image not built"
-        case .needsContainer: return "Container not created"
-        case .stopped: return "Container stopped"
-        case .starting: return "Container starting"
-        case .running: return "Container running"
-        case .error: return "Error"
+    private func checkRuntimeAgain() {
+        Task {
+            runtimeInstallStatus = .working("Checking runtime availability...")
+            await manager.sync()
+            if manager.state == .noRuntime {
+                runtimeInstallStatus = .failed("Runtime still not detected at /usr/local/bin/container.")
+            } else {
+                runtimeInstallStatus = .idle
+            }
         }
     }
 
-    private var stateIcon: String {
-        switch manager.state {
-        case .running: return "checkmark.circle.fill"
-        case .error: return "xmark.octagon.fill"
-        case .starting, .checking: return "clock.fill"
-        default: return "circle"
-        }
-    }
-
-    private var stateColor: Color {
-        switch manager.state {
-        case .running: return .green
-        case .error: return .red
-        case .starting, .checking: return .orange
-        default: return .secondary
-        }
+    private func openManualInstallPage() {
+        openURL(URL(string: "https://github.com/apple/container/releases")!)
     }
 }
 

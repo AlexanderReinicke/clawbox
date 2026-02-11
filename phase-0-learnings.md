@@ -39,6 +39,11 @@ Date: 2026-02-11
   - `disconnected (1008): control ui requires HTTPS or localhost (secure context)`
   - `disconnected (1008): device identity required`
   - Root cause: accessing Control UI via `http://<container-ip>:18789` is not localhost/HTTPS; browser client must provide shared auth and/or device identity unless explicitly relaxed.
+- OpenAI key can appear "missing" even after `openclaw configure`:
+  - In this path, OpenClaw stores OpenAI credentials in `~/.openclaw/.env` as `OPENAI_API_KEY`.
+  - It does not necessarily create `~/.openclaw/agents/main/agent/auth-profiles.json` for OpenAI key auth.
+  - If gateway is already running, it may not reload the newly written `.env` immediately.
+  - Symptom: `No API key found for openai api` until gateway process is fully restarted.
 
 ## Recommended defaults going forward
 
@@ -130,6 +135,12 @@ openclaw config set gateway.remote.token "$(openclaw config get gateway.auth.tok
    - Gateway listening on `ws://0.0.0.0:18789`
    - Host browser reachable at `http://<container-ip>:18789`
 
+10. OpenAI key root-cause verification:
+   - Started gateway with no key loaded and reproduced `No API key found`.
+   - Ran OpenClaw onboarding/configuration to write key to `~/.openclaw/.env`.
+   - Confirmed issue could persist while existing gateway process stayed alive.
+   - After hard restart of gateway process, requests used the key (then surfaced `401` when key value itself was invalid), proving stale process/env was the immediate cause of "missing key".
+
 ## Dev-only security rollback (when done testing)
 
 ```bash
@@ -170,3 +181,9 @@ openclaw gateway --bind lan
   - auto-sets `gateway.controlUi.allowInsecureAuth=true`
   - auto-sets `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
   - starts gateway with robust process detection (`pgrep -x openclaw-gateway`)
+- `ClawMarket/ClawMarket/Models/AgentManager.swift` now also protects against stale gateway auth/env:
+  - computes a gateway signature from key config values plus hashes of:
+    - `OPENAI_API_KEY` in `~/.openclaw/.env`
+    - `~/.openclaw/agents/main/agent/auth-profiles.json` (or `missing`)
+  - if signature changes and gateway is already up, app restarts gateway before opening dashboard
+  - exports `OPENAI_API_KEY` from `~/.openclaw/.env` in gateway startup path so OpenAI auth works even when auth profiles are absent

@@ -543,13 +543,13 @@ print(target)
 
     private func ensureDashboardGatewayRunning() async throws {
         let startGatewayScript = """
-if pgrep -x openclaw-gateway >/dev/null 2>&1; then
+if pgrep -f "[o]penclaw-gateway" >/dev/null 2>&1; then
   echo "running"
 else
   export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=768}"
   nohup openclaw gateway --bind lan >/tmp/openclaw-gateway.log 2>&1 &
   sleep 2
-  pgrep -x openclaw-gateway >/dev/null 2>&1 && echo "started" || echo "failed"
+  pgrep -f "[o]penclaw-gateway" >/dev/null 2>&1 && echo "started" || echo "failed"
 fi
 """
 

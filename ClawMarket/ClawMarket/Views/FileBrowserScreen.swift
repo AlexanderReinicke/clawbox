@@ -53,7 +53,7 @@ struct FileBrowserScreen: View {
                 contentSplitView
             }
         }
-        .frame(minWidth: 980, minHeight: 620)
+        .frame(minWidth: 760, minHeight: 520)
         .background(Color(NSColor.windowBackgroundColor))
         .overlay(alignment: .bottom) {
             if let banner = activeBanner {
@@ -74,10 +74,10 @@ struct FileBrowserScreen: View {
     private var contentSplitView: some View {
         HSplitView {
             leftPane
-                .frame(minWidth: 420, idealWidth: 560)
+                .frame(minWidth: 280, idealWidth: 430)
 
             previewPane
-                .frame(minWidth: 320, idealWidth: 420)
+                .frame(minWidth: 260, idealWidth: 330)
         }
     }
 

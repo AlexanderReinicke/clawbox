@@ -7,8 +7,8 @@ struct RootView: View {
     @State private var runtimeInstallStatus: RuntimeInstallStatus = .idle
     @State private var setupProgressState: SetupProgressState?
     @State private var isLaunchingTemplate = false
-    @State private var showingTerminal = false
-    @State private var showingFiles = false
+    @State private var terminalWindowController: NSWindowController?
+    @State private var filesWindowController: NSWindowController?
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -48,8 +48,8 @@ struct RootView: View {
                         state: manager.state,
                         onStart: startAgent,
                         onStop: stopAgent,
-                        onOpenTerminal: { showingTerminal = true },
-                        onOpenFiles: { showingFiles = true },
+                        onOpenTerminal: openTerminalWindow,
+                        onOpenFiles: openFilesWindow,
                         onRefresh: { Task { await manager.sync() } }
                     )
                 case let .error(message):
@@ -75,18 +75,6 @@ struct RootView: View {
                     await manager.sync()
                 }
             }
-        }
-        .sheet(isPresented: $showingTerminal) {
-            TerminalScreen(containerName: manager.containerName) {
-                showingTerminal = false
-            }
-            .frame(minWidth: 920, minHeight: 600)
-        }
-        .sheet(isPresented: $showingFiles) {
-            FileBrowserScreen(manager: manager) {
-                showingFiles = false
-            }
-            .frame(minWidth: 920, minHeight: 620)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await manager.sync() }
@@ -223,6 +211,56 @@ struct RootView: View {
                 manager.state = .error("Reset failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func openTerminalWindow() {
+        if let existing = terminalWindowController?.window {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let content = TerminalScreen(containerName: manager.containerName)
+            .frame(minWidth: 720, minHeight: 460)
+
+        let hostingController = NSHostingController(rootView: content)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Agent Terminal"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 1060, height: 720))
+        window.minSize = NSSize(width: 720, height: 460)
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        let controller = NSWindowController(window: window)
+        terminalWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openFilesWindow() {
+        if let existing = filesWindowController?.window {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let content = FileBrowserScreen(manager: manager)
+            .frame(minWidth: 760, minHeight: 520)
+
+        let hostingController = NSHostingController(rootView: content)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Agent Files"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 1160, height: 760))
+        window.minSize = NSSize(width: 760, height: 520)
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        let controller = NSWindowController(window: window)
+        filesWindowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 

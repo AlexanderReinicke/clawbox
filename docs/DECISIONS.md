@@ -41,3 +41,20 @@
 - Context: installing `openclaw` after `USER agent` causes permission errors writing `/usr/local/lib/node_modules`.
 - Decision: run `npm install -g openclaw@2026.2.9` as root, then switch to `agent`.
 - Consequence: image build remains reproducible and `openclaw` is available in `/usr/local/bin` for the runtime user.
+
+## D-007: Normalize dashboard access to localhost and enforce gateway auth compatibility
+
+- Status: accepted
+- Context: opening Control UI on `http://<container-ip>:18789` caused recurrent browser disconnects:
+  - `disconnected (1008): control ui requires HTTPS or localhost (secure context)`
+  - `disconnected (1008): device identity required`
+- Decision:
+  - Create containers with `-p 127.0.0.1:18789:18789`.
+  - Prefer `http://127.0.0.1:18789` for dashboard launch.
+  - During dashboard startup, auto-apply:
+    - `gateway.controlUi.allowInsecureAuth=true`
+    - `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
+  - Use `pgrep -x openclaw-gateway` for reliable gateway process detection.
+- Consequence:
+  - Dashboard launch is stable and no longer depends on direct container-IP browsing.
+  - Local/dev security posture is relaxed for UX stability and should be revisited before production hardening.

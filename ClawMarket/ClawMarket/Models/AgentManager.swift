@@ -89,6 +89,11 @@ struct AgentFilePreview: Codable {
     let binary: Bool
 }
 
+private struct DashboardEndpoint {
+    let host: String
+    let port: Int
+}
+
 @MainActor
 @Observable
 final class AgentManager {
@@ -99,6 +104,7 @@ final class AgentManager {
     let containerMemory = "4096M"
     let defaultBrowsePath = "/home/agent"
     let dashboardPort = 18789
+    let dashboardLocalHost = "127.0.0.1"
     let runtimeInstallerURL = URL(string: "https://github.com/apple/container/releases/download/0.9.0/container-installer-signed.pkg")!
     let logMaxBytes = 1_000_000
 
@@ -215,6 +221,7 @@ final class AgentManager {
             "create",
             "--name", containerName,
             "-m", containerMemory,
+            "-p", "\(dashboardLocalHost):\(dashboardPort):\(dashboardPort)",
             imageTag,
             "sleep", "infinity"
         )
@@ -426,12 +433,20 @@ print(json.dumps({
 
     func dashboardURL() async throws -> URL {
         try await ensureContainerRunningForFileOperations()
+        try await configureDashboardControlUIAccess()
         try await ensureDashboardGatewayRunning()
-        let ipAddress = try await resolveContainerIPAddress()
-        guard let url = URL(string: "http://\(ipAddress):\(dashboardPort)") else {
-            throw AgentManagerError.dashboardAddressUnavailable("Failed to construct dashboard URL.")
+        if let endpoint = try await resolvePublishedDashboardEndpoint() {
+            guard let publishedURL = URL(string: "http://\(endpoint.host):\(endpoint.port)") else {
+                throw AgentManagerError.dashboardAddressUnavailable("Failed to construct dashboard URL from published port mapping.")
+            }
+            return publishedURL
         }
-        return url
+
+        let ipAddress = try await resolveContainerIPAddress()
+        guard let fallbackURL = URL(string: "http://\(ipAddress):\(dashboardPort)") else {
+            throw AgentManagerError.dashboardAddressUnavailable("Failed to construct dashboard URL from container IP.")
+        }
+        return fallbackURL
     }
 
     private func uploadItemRecursive(from sourceURL: URL, toDirectory directoryPath: String) async throws -> AgentUploadResult {
@@ -528,12 +543,13 @@ print(target)
 
     private func ensureDashboardGatewayRunning() async throws {
         let startGatewayScript = """
-if pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+if pgrep -x openclaw-gateway >/dev/null 2>&1; then
   echo "running"
 else
+  export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=768}"
   nohup openclaw gateway --bind lan >/tmp/openclaw-gateway.log 2>&1 &
-  sleep 1
-  pgrep -f "openclaw gateway" >/dev/null 2>&1 && echo "started" || echo "failed"
+  sleep 2
+  pgrep -x openclaw-gateway >/dev/null 2>&1 && echo "started" || echo "failed"
 fi
 """
 
@@ -547,6 +563,76 @@ fi
                 "Could not start gateway inside container. Check /tmp/openclaw-gateway.log in the agent."
             )
         }
+    }
+
+    private func configureDashboardControlUIAccess() async throws {
+        let configureScript = """
+openclaw config set gateway.controlUi.allowInsecureAuth true --json >/dev/null 2>&1 || true
+openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true --json >/dev/null 2>&1 || true
+echo "configured"
+"""
+        _ = try await shell(
+            ["exec", containerName, "/bin/bash", "-lc", configureScript],
+            timeout: 90
+        )
+    }
+
+    private func resolvePublishedDashboardEndpoint() async throws -> DashboardEndpoint? {
+        let output = try await shell("inspect", containerName)
+        guard let data = output.data(using: .utf8) else {
+            return nil
+        }
+
+        guard
+            let root = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+            let first = root.first,
+            let configuration = first["configuration"] as? [String: Any],
+            let publishedPorts = configuration["publishedPorts"] as? [[String: Any]]
+        else {
+            return nil
+        }
+
+        for mapping in publishedPorts {
+            let containerPort = intValue(mapping["containerPort"])
+            let hostPort = intValue(mapping["hostPort"])
+            let rawHost = stringValue(mapping["hostAddress"]) ?? stringValue(mapping["hostIP"]) ?? stringValue(mapping["hostIp"]) ?? dashboardLocalHost
+
+            guard containerPort == dashboardPort, let hostPort else {
+                continue
+            }
+
+            let host = normalizeDashboardHost(rawHost)
+            return DashboardEndpoint(host: host, port: hostPort)
+        }
+
+        return nil
+    }
+
+    private func normalizeDashboardHost(_ value: String) -> String {
+        if value.isEmpty || value == "0.0.0.0" || value == "::" {
+            return dashboardLocalHost
+        }
+        return value
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let intValue = value as? Int {
+            return intValue
+        }
+        if let numberValue = value as? NSNumber {
+            return numberValue.intValue
+        }
+        if let stringValue = value as? String {
+            return Int(stringValue)
+        }
+        return nil
+    }
+
+    private func stringValue(_ value: Any?) -> String? {
+        if let stringValue = value as? String {
+            return stringValue
+        }
+        return nil
     }
 
     private func resolveContainerIPAddress() async throws -> String {

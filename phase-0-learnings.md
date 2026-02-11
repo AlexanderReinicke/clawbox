@@ -50,11 +50,14 @@ Date: 2026-02-11
 - Keep container alive with:
   - `sleep infinity`
 - Bake `NODE_OPTIONS=--max-old-space-size=768` into image env.
-- For host-browser access, run gateway with `--bind lan` and open `http://<container-ip>:18789`.
+- For host-browser access, publish dashboard port and prefer localhost:
+  - container create should include `-p 127.0.0.1:18789:18789`
+  - app should open `http://127.0.0.1:18789`
+  - keep container-IP fallback only for legacy containers without port mapping
 - Keep a documented dev-only fallback for Control UI auth friction:
   - `gateway.controlUi.allowInsecureAuth=true`
   - `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
-  - These should be disabled outside local/dev testing.
+  - In app setup, set these automatically before gateway start to avoid repeated `1008` disconnects.
 
 ## Exact session log (what we actually did)
 
@@ -162,3 +165,8 @@ openclaw gateway --bind lan
 - `ClawMarket/Resources/Dockerfile` should use `node:22-bookworm-slim`, install build deps, install `openclaw@2026.2.9`, and set `NODE_OPTIONS`.
 - This removes Alpine-specific blockers and makes setup reproducible.
 - `ClawMarket/ClawMarket/Models/AgentManager.swift` default memory is now `4096M` to match the stable baseline.
+- `ClawMarket/ClawMarket/Models/AgentManager.swift` dashboard flow now:
+  - creates new containers with published port `127.0.0.1:18789:18789`
+  - auto-sets `gateway.controlUi.allowInsecureAuth=true`
+  - auto-sets `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
+  - starts gateway with robust process detection (`pgrep -x openclaw-gateway`)

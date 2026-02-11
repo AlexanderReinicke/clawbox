@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct FileBrowserScreen: View {
     let manager: AgentManager
@@ -7,7 +8,11 @@ struct FileBrowserScreen: View {
     @State private var currentPath: String
     @State private var entries: [AgentFileEntry] = []
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var listingErrorMessage: String?
+    @State private var uploadStatusMessage: String?
+    @State private var uploadErrorMessage: String?
+    @State private var isDropTargeted = false
+    @State private var isUploading = false
 
     init(manager: AgentManager, onBack: (() -> Void)? = nil) {
         self.manager = manager
@@ -23,12 +28,12 @@ struct FileBrowserScreen: View {
             if isLoading && entries.isEmpty {
                 ProgressView("Loading \(currentPath)")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorMessage {
+            } else if let listingErrorMessage, entries.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 26))
                         .foregroundStyle(.orange)
-                    Text(errorMessage)
+                    Text(listingErrorMessage)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                     Button("Retry") {
@@ -39,23 +44,53 @@ struct FileBrowserScreen: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(entries) { entry in
-                    if entry.isDirectory {
-                        Button {
-                            currentPath = entry.path
-                        } label: {
+                ZStack {
+                    List(entries) { entry in
+                        if entry.isDirectory {
+                            Button {
+                                currentPath = entry.path
+                            } label: {
+                                fileRow(entry)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
                             fileRow(entry)
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        fileRow(entry)
+                    }
+                    .listStyle(.inset)
+
+                    if isDropTargeted {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(.blue.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 8]))
+                            .padding(12)
+                            .transition(.opacity)
+                    }
+
+                    if isUploading {
+                        Color.black.opacity(0.08)
+                            .ignoresSafeArea()
+                        ProgressView("Uploading to \(currentPath)")
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
-                .listStyle(.inset)
             }
         }
         .frame(minWidth: 860, minHeight: 560)
         .background(Color(NSColor.windowBackgroundColor))
+        .overlay(alignment: .bottom) {
+            if let banner = activeBanner {
+                Text(banner.text)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(.white)
+                    .background(banner.color, in: Capsule())
+                    .padding(.bottom, 12)
+            }
+        }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: handleDroppedItems)
         .task(id: currentPath) {
             await loadCurrentPath()
         }
@@ -74,6 +109,10 @@ struct FileBrowserScreen: View {
 
                 Text("Agent Files")
                     .font(.headline)
+
+                Text("Drop files from Finder to upload into this folder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Spacer()
 
@@ -160,9 +199,110 @@ struct FileBrowserScreen: View {
             let listing = try await manager.listDirectory(path: currentPath)
             currentPath = listing.path
             entries = listing.entries
-            errorMessage = nil
+            listingErrorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            listingErrorMessage = error.localizedDescription
+        }
+    }
+
+    private var activeBanner: (text: String, color: Color)? {
+        if let uploadErrorMessage {
+            return (uploadErrorMessage, .red.opacity(0.9))
+        }
+        if let listingErrorMessage, !entries.isEmpty {
+            return (listingErrorMessage, .red.opacity(0.9))
+        }
+        if let uploadStatusMessage {
+            return (uploadStatusMessage, .green.opacity(0.9))
+        }
+        return nil
+    }
+
+    private func handleDroppedItems(_ providers: [NSItemProvider]) -> Bool {
+        let accepted = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !accepted.isEmpty else {
+            return false
+        }
+        Task {
+            await importDroppedFiles(from: accepted)
+        }
+        return true
+    }
+
+    private func importDroppedFiles(from providers: [NSItemProvider]) async {
+        isUploading = true
+        uploadErrorMessage = nil
+        uploadStatusMessage = nil
+
+        let urls = await resolveDroppedURLs(from: providers)
+        guard !urls.isEmpty else {
+            isUploading = false
+            uploadErrorMessage = "Drop did not include any readable file URLs."
+            return
+        }
+
+        var uploadedCount = 0
+        var failures: [String] = []
+
+        for url in urls {
+            let hasScopedAccess = url.startAccessingSecurityScopedResource()
+            do {
+                _ = try await manager.uploadFile(from: url, toDirectory: currentPath)
+                uploadedCount += 1
+            } catch {
+                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+            }
+            if hasScopedAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        await loadCurrentPath()
+        isUploading = false
+
+        if uploadedCount > 0 {
+            let noun = uploadedCount == 1 ? "file" : "files"
+            uploadStatusMessage = "Uploaded \(uploadedCount) \(noun) to \(currentPath)"
+        }
+        if !failures.isEmpty {
+            let first = failures[0]
+            uploadErrorMessage = failures.count == 1
+                ? "Upload failed: \(first)"
+                : "Upload failed for \(failures.count) items. First error: \(first)"
+        }
+    }
+
+    private func resolveDroppedURLs(from providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        for provider in providers {
+            if let url = await loadFileURL(from: provider) {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    private func loadFileURL(from provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                if let url = item as? URL {
+                    continuation.resume(returning: url)
+                    return
+                }
+                if let nsURL = item as? NSURL {
+                    continuation.resume(returning: nsURL as URL)
+                    return
+                }
+                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    continuation.resume(returning: url)
+                    return
+                }
+                if let value = item as? String, let url = URL(string: value), url.isFileURL {
+                    continuation.resume(returning: url)
+                    return
+                }
+                continuation.resume(returning: nil)
+            }
         }
     }
 

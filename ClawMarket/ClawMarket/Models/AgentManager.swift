@@ -21,6 +21,7 @@ enum AgentManagerError: LocalizedError {
     case missingDockerfile
     case imageBuildFailed(String)
     case invalidDirectoryListing(String)
+    case invalidUploadSource(String)
 
     var errorDescription: String? {
         switch self {
@@ -41,6 +42,8 @@ enum AgentManagerError: LocalizedError {
             return "Failed to build default image.\n\(message)"
         case let .invalidDirectoryListing(message):
             return "Failed to read agent filesystem.\n\(message)"
+        case let .invalidUploadSource(message):
+            return "File upload failed.\n\(message)"
         }
     }
 }
@@ -345,6 +348,61 @@ print(json.dumps(result))
         }
     }
 
+    func uploadFile(from sourceURL: URL, toDirectory directoryPath: String) async throws -> String {
+        guard sourceURL.isFileURL else {
+            throw AgentManagerError.invalidUploadSource("Only local files can be uploaded.")
+        }
+
+        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+        if values.isDirectory == true {
+            throw AgentManagerError.invalidUploadSource("Folders are not supported yet: \(sourceURL.lastPathComponent)")
+        }
+        guard values.isRegularFile == true else {
+            throw AgentManagerError.invalidUploadSource("Unsupported file type: \(sourceURL.lastPathComponent)")
+        }
+
+        guard await checkRuntime() else {
+            throw AgentManagerError.runtimeMissing
+        }
+        guard try await containerIsRunning() else {
+            throw AgentManagerError.commandFailed(
+                command: "container exec",
+                exitCode: 1,
+                stderr: "Container \(containerName) is not running."
+            )
+        }
+
+        let fileName = sourceURL.lastPathComponent
+        guard !fileName.isEmpty else {
+            throw AgentManagerError.invalidUploadSource("Could not resolve file name.")
+        }
+
+        let destinationPath = (directoryPath as NSString).appendingPathComponent(fileName)
+        let uploadScript = """
+import os, sys
+destination = sys.argv[1]
+parent = os.path.dirname(destination)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+with open(destination, "wb") as handle:
+    while True:
+        chunk = sys.stdin.buffer.read(1024 * 1024)
+        if not chunk:
+            break
+        handle.write(chunk)
+print(destination)
+"""
+
+        let timeout = max(120, inferredUploadTimeout(for: sourceURL))
+        let uploadedPath = try await runCommand(
+            executable: runtimePath,
+            args: ["exec", "-i", containerName, "python3", "-c", uploadScript, destinationPath],
+            timeout: timeout,
+            inputFilePath: sourceURL.path
+        )
+        return uploadedPath
+    }
+
     func resetError() {
         lastErrorMessage = nil
     }
@@ -379,7 +437,12 @@ print(json.dumps(result))
     }
 
     @discardableResult
-    private func runCommand(executable: String, args: [String], timeout: TimeInterval = 600) async throws -> String {
+    private func runCommand(
+        executable: String,
+        args: [String],
+        timeout: TimeInterval = 600,
+        inputFilePath: String? = nil
+    ) async throws -> String {
         let command = ([executable] + args).joined(separator: " ")
         log("CMD START: \(command)")
         do {
@@ -408,6 +471,16 @@ print(json.dumps(result))
 
                 process.standardOutput = stdoutWriter
                 process.standardError = stderrWriter
+
+                var inputReader: FileHandle?
+                if let inputFilePath {
+                    let inputURL = URL(fileURLWithPath: inputFilePath)
+                    inputReader = try FileHandle(forReadingFrom: inputURL)
+                    process.standardInput = inputReader
+                }
+                defer {
+                    try? inputReader?.close()
+                }
 
                 try process.run()
                 let deadline = Date().addingTimeInterval(timeout)
@@ -568,6 +641,13 @@ print(json.dumps(result))
             return message
         }
         return String(message.prefix(maxLength)) + "..."
+    }
+
+    private func inferredUploadTimeout(for sourceURL: URL) -> TimeInterval {
+        let size = (try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let bytesPerSecond = 8_000_000
+        let seconds = Double(size) / Double(bytesPerSecond)
+        return seconds + 30
     }
 
     private func setError(_ error: Error) {

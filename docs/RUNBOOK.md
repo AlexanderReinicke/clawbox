@@ -32,3 +32,10 @@ Expected: `apiserver is running`.
   - Run `container system start`.
 - Node memory OOM in guest:
   - Confirm container memory and `NODE_OPTIONS` are set.
+
+## Logs
+
+- Agent command log:
+  - `~/Library/Logs/ClawMarket/agent.log`
+- Rotation:
+  - current log rolls to `agent.log.1` around 1 MB.

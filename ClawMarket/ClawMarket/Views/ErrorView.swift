@@ -1,8 +1,11 @@
 import SwiftUI
+import AppKit
 
 struct ErrorView: View {
     var message: String = "Unknown error"
     var onRetry: (() -> Void)? = nil
+    var onReset: (() -> Void)? = nil
+    @State private var copied = false
 
     var body: some View {
         VStack(spacing: 14) {
@@ -22,6 +25,18 @@ struct ErrorView: View {
                 Button("Retry", action: onRetry)
                     .buttonStyle(.borderedProminent)
             }
+            if let onReset {
+                Button("Reset Environment", role: .destructive, action: onReset)
+                    .buttonStyle(.bordered)
+            }
+            Button(copied ? "Copied" : "Copy Error") {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(message, forType: .string)
+                copied = true
+            }
+            .buttonStyle(.bordered)
+            .onAppear { copied = false }
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

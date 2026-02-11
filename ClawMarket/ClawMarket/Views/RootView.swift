@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct RootView: View {
     @AppStorage("clawmarket.hasSeenWelcome") private var hasSeenWelcome = false
@@ -50,10 +51,14 @@ struct RootView: View {
                         onRefresh: { Task { await manager.sync() } }
                     )
                 case let .error(message):
-                    ErrorView(message: message) {
-                        runtimeInstallStatus = .idle
-                        Task { await manager.sync() }
-                    }
+                    ErrorView(
+                        message: message,
+                        onRetry: {
+                            runtimeInstallStatus = .idle
+                            Task { await manager.sync() }
+                        },
+                        onReset: resetEnvironment
+                    )
                 }
             }
         }
@@ -74,6 +79,9 @@ struct RootView: View {
                 showingTerminal = false
             }
             .frame(minWidth: 920, minHeight: 600)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await manager.sync() }
         }
         .animation(.easeInOut(duration: 0.2), value: hasSeenWelcome)
         .animation(.easeInOut(duration: 0.2), value: manager.state)
@@ -192,6 +200,20 @@ struct RootView: View {
             return "poll-stopped"
         default:
             return "poll-off"
+        }
+    }
+
+    private func resetEnvironment() {
+        Task {
+            do {
+                try await manager.factoryReset()
+                runtimeInstallStatus = .idle
+                setupProgressState = nil
+                isLaunchingTemplate = false
+                await manager.sync()
+            } catch {
+                manager.state = .error("Reset failed: \(error.localizedDescription)")
+            }
         }
     }
 }

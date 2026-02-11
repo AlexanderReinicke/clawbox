@@ -51,12 +51,14 @@ final class AgentManager {
     let containerName = "claw-agent-1"
     let containerMemory = "2048M"
     let runtimeInstallerURL = URL(string: "https://github.com/apple/container/releases/download/0.9.0/container-installer-signed.pkg")!
+    let logMaxBytes = 1_000_000
 
     var state: AgentState = .checking
     var lastCommandOutput: String = ""
     var lastErrorMessage: String?
 
     init(autoSync: Bool = true) {
+        prepareLogging()
         if autoSync {
             Task {
                 await sync()
@@ -69,6 +71,9 @@ final class AgentManager {
         lastErrorMessage = nil
         do {
             guard await checkRuntime() else {
+                if case .error = state {
+                    return
+                }
                 state = .noRuntime
                 return
             }
@@ -221,6 +226,22 @@ final class AgentManager {
         state = .needsContainer
     }
 
+    func deleteImage() async throws {
+        guard await checkRuntime() else {
+            throw AgentManagerError.runtimeMissing
+        }
+        if try await imageExists() {
+            _ = try await shell("image", "rm", imageTag)
+        }
+        state = .needsImage
+    }
+
+    func factoryReset() async throws {
+        try await deleteContainer()
+        try await deleteImage()
+        state = .needsImage
+    }
+
     func resetError() {
         lastErrorMessage = nil
     }
@@ -257,62 +278,74 @@ final class AgentManager {
     @discardableResult
     private func runCommand(executable: String, args: [String], timeout: TimeInterval = 600) async throws -> String {
         let command = ([executable] + args).joined(separator: " ")
-        let result = try await Task.detached(priority: .userInitiated) { () -> CommandResult in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = args
+        log("CMD START: \(command)")
+        do {
+            let result = try await Task.detached(priority: .userInitiated) { () -> CommandResult in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = args
 
-            let fileManager = FileManager.default
-            let tempDirectory = fileManager.temporaryDirectory.appendingPathComponent("clawmarket-shell-\(UUID().uuidString)")
-            try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
-            defer {
-                try? fileManager.removeItem(at: tempDirectory)
-            }
-
-            let stdoutURL = tempDirectory.appendingPathComponent("stdout.log")
-            let stderrURL = tempDirectory.appendingPathComponent("stderr.log")
-            _ = fileManager.createFile(atPath: stdoutURL.path, contents: nil)
-            _ = fileManager.createFile(atPath: stderrURL.path, contents: nil)
-            let stdoutWriter = try FileHandle(forWritingTo: stdoutURL)
-            let stderrWriter = try FileHandle(forWritingTo: stderrURL)
-            defer {
-                try? stdoutWriter.close()
-                try? stderrWriter.close()
-            }
-
-            process.standardOutput = stdoutWriter
-            process.standardError = stderrWriter
-
-            try process.run()
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning {
-                if Date() > deadline {
-                    process.terminate()
-                    try await Task.sleep(for: .milliseconds(250))
-                    if process.isRunning {
-                        process.interrupt()
-                    }
-                    throw AgentManagerError.commandTimeout(command: command, seconds: timeout)
+                let fileManager = FileManager.default
+                let tempDirectory = fileManager.temporaryDirectory.appendingPathComponent("clawmarket-shell-\(UUID().uuidString)")
+                try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+                defer {
+                    try? fileManager.removeItem(at: tempDirectory)
                 }
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
-            let stderr = (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? ""
-            let exitCode = process.terminationStatus
-            if exitCode != 0 {
-                throw AgentManagerError.commandFailed(
-                    command: command,
-                    exitCode: exitCode,
-                    stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-            }
-            return CommandResult(stdout: stdout, stderr: stderr)
-        }.value
 
-        let stdoutTrimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        let stderrTrimmed = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        lastCommandOutput = ([stdoutTrimmed, stderrTrimmed].filter { !$0.isEmpty }).joined(separator: "\n")
-        return stdoutTrimmed
+                let stdoutURL = tempDirectory.appendingPathComponent("stdout.log")
+                let stderrURL = tempDirectory.appendingPathComponent("stderr.log")
+                _ = fileManager.createFile(atPath: stdoutURL.path, contents: nil)
+                _ = fileManager.createFile(atPath: stderrURL.path, contents: nil)
+                let stdoutWriter = try FileHandle(forWritingTo: stdoutURL)
+                let stderrWriter = try FileHandle(forWritingTo: stderrURL)
+                defer {
+                    try? stdoutWriter.close()
+                    try? stderrWriter.close()
+                }
+
+                process.standardOutput = stdoutWriter
+                process.standardError = stderrWriter
+
+                try process.run()
+                let deadline = Date().addingTimeInterval(timeout)
+                while process.isRunning {
+                    if Date() > deadline {
+                        process.terminate()
+                        try await Task.sleep(for: .milliseconds(250))
+                        if process.isRunning {
+                            process.interrupt()
+                        }
+                        throw AgentManagerError.commandTimeout(command: command, seconds: timeout)
+                    }
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+                let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
+                let stderr = (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? ""
+                let exitCode = process.terminationStatus
+                if exitCode != 0 {
+                    throw AgentManagerError.commandFailed(
+                        command: command,
+                        exitCode: exitCode,
+                        stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                }
+                return CommandResult(stdout: stdout, stderr: stderr)
+            }.value
+
+            let stdoutTrimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stderrTrimmed = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            lastCommandOutput = ([stdoutTrimmed, stderrTrimmed].filter { !$0.isEmpty }).joined(separator: "\n")
+
+            if !stdoutTrimmed.isEmpty {
+                log("CMD OK: \(trimForLog(stdoutTrimmed))")
+            } else {
+                log("CMD OK: (no stdout)")
+            }
+            return stdoutTrimmed
+        } catch {
+            log("CMD ERROR: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     private func downloadRuntimeInstaller() async throws -> String {
@@ -378,10 +411,67 @@ final class AgentManager {
         return nil
     }
 
+    private var logDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library")
+            .appendingPathComponent("Logs")
+            .appendingPathComponent("ClawMarket", isDirectory: true)
+    }
+
+    private var logFileURL: URL {
+        logDirectoryURL.appendingPathComponent("agent.log")
+    }
+
+    private func prepareLogging() {
+        try? FileManager.default.createDirectory(at: logDirectoryURL, withIntermediateDirectories: true)
+        log("Logger initialized")
+    }
+
+    private func rotateLogIfNeeded() {
+        guard
+            let attrs = try? FileManager.default.attributesOfItem(atPath: logFileURL.path),
+            let size = attrs[.size] as? NSNumber,
+            size.intValue > logMaxBytes
+        else {
+            return
+        }
+        let archived = logDirectoryURL.appendingPathComponent("agent.log.1")
+        try? FileManager.default.removeItem(at: archived)
+        try? FileManager.default.moveItem(at: logFileURL, to: archived)
+    }
+
+    private func log(_ message: String) {
+        rotateLogIfNeeded()
+        let formatter = ISO8601DateFormatter()
+        let line = "[\(formatter.string(from: Date()))] \(message)\n"
+        let data = Data(line.utf8)
+        if FileManager.default.fileExists(atPath: logFileURL.path) {
+            if let handle = try? FileHandle(forWritingTo: logFileURL) {
+                do {
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                    try handle.close()
+                } catch {
+                    try? handle.close()
+                }
+            }
+        } else {
+            try? data.write(to: logFileURL)
+        }
+    }
+
+    private func trimForLog(_ message: String, maxLength: Int = 400) -> String {
+        if message.count <= maxLength {
+            return message
+        }
+        return String(message.prefix(maxLength)) + "..."
+    }
+
     private func setError(_ error: Error) {
         let message = error.localizedDescription
         lastErrorMessage = message
         state = .error(message)
+        log("STATE ERROR: \(message)")
     }
 }
 

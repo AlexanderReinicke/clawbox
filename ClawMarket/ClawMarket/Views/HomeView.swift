@@ -2141,29 +2141,6 @@ private extension ShellSelection {
     }
 }
 
-private extension Color {
-    static let shellDeepest = Color(hex: 0x0B0E14)
-    static let shellSurface = Color(hex: 0x131720)
-    static let shellElevated = Color(hex: 0x1A1F2E)
-    static let shellBorder = Color(hex: 0x21262D)
-    static let shellAccent = Color(hex: 0x58A6FF)
-    static let shellAccentMuted = Color(hex: 0x1F3A5C)
-    static let shellRunning = Color(hex: 0x3FB950)
-    static let shellWarning = Color(hex: 0xD29922)
-    static let shellError = Color(hex: 0xF85149)
-    static let shellStopped = Color(hex: 0x484F58)
-    static let shellTextPrimary = Color(hex: 0xE6EDF3)
-    static let shellTextSecondary = Color(hex: 0x8B949E)
-    static let shellTextMuted = Color(hex: 0x484F58)
-
-    init(hex: UInt32, alpha: Double = 1.0) {
-        let red = Double((hex >> 16) & 0xFF) / 255.0
-        let green = Double((hex >> 8) & 0xFF) / 255.0
-        let blue = Double(hex & 0xFF) / 255.0
-        self.init(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
-    }
-}
-
 #Preview {
     HomeView(
         agents: [

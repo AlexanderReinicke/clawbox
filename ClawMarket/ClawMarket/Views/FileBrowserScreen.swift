@@ -73,7 +73,7 @@ struct FileBrowserScreen: View {
             }
         }
         .frame(minWidth: 860, minHeight: 560)
-        .background(Color(red: 0.06, green: 0.08, blue: 0.12))
+        .background(Color.shellDeepest)
         .overlay(alignment: .bottom) {
             if let banner = activeBanner {
                 HStack(spacing: 8) {
@@ -83,7 +83,7 @@ struct FileBrowserScreen: View {
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.shellTextPrimary)
                 .background(banner.color.opacity(0.95), in: Capsule())
                 .padding(.bottom, 10)
             }
@@ -217,7 +217,7 @@ struct FileBrowserScreen: View {
             }
 
             if isUploading {
-                Color.black.opacity(0.2)
+                Color.shellScrim
                     .ignoresSafeArea()
                 ProgressView("Uploading to \(currentPath)")
                     .padding(.horizontal, 16)
@@ -254,8 +254,8 @@ struct FileBrowserScreen: View {
                 TextEditor(text: textBinding)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .scrollContentBackground(.hidden)
-                    .background(Color(red: 0.05, green: 0.07, blue: 0.10))
-                    .foregroundStyle(Color(red: 0.90, green: 0.93, blue: 0.96))
+                    .background(Color.shellDeepest)
+                    .foregroundStyle(Color.shellTextPrimary)
                     .disabled(isReadOnly)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
@@ -266,7 +266,7 @@ struct FileBrowserScreen: View {
             Divider()
             editorFooter
         }
-        .background(Color(red: 0.08, green: 0.10, blue: 0.14))
+        .background(Color.shellSurface)
     }
 
     private var editorTabsBar: some View {
@@ -284,16 +284,16 @@ struct FileBrowserScreen: View {
                                     .lineLimit(1)
                                 if isModified {
                                     Text("●")
-                                        .foregroundStyle(Color(red: 0.82, green: 0.63, blue: 0.17))
+                                        .foregroundStyle(Color.shellWarning)
                                 }
                             }
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(isActive ? .white : Color(red: 0.71, green: 0.75, blue: 0.80))
+                            .foregroundStyle(isActive ? Color.shellTextPrimary : Color.shellTextSecondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(isActive ? Color(red: 0.16, green: 0.20, blue: 0.29) : Color(red: 0.10, green: 0.12, blue: 0.18))
+                                    .fill(isActive ? Color.shellElevated : Color.shellDeepest)
                             )
                         }
                         .buttonStyle(.plain)
@@ -303,7 +303,7 @@ struct FileBrowserScreen: View {
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(Color(red: 0.67, green: 0.72, blue: 0.79))
+                                .foregroundStyle(Color.shellTextSecondary)
                         }
                         .buttonStyle(.plain)
                     }
@@ -312,7 +312,7 @@ struct FileBrowserScreen: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
         }
-        .background(Color(red: 0.10, green: 0.12, blue: 0.17))
+        .background(Color.shellSurface)
     }
 
     private var editorHeader: some View {
@@ -320,17 +320,17 @@ struct FileBrowserScreen: View {
             if let activeTab {
                 Text(activeTab.name)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.shellTextPrimary)
             } else {
                 Text("Editor")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.shellTextPrimary)
             }
 
             if isModified {
                 Text("● Modified")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.82, green: 0.63, blue: 0.17))
+                    .foregroundStyle(Color.shellWarning)
             }
 
             if isReadOnly {
@@ -342,7 +342,7 @@ struct FileBrowserScreen: View {
             if activeTab?.isTruncated == true {
                 Text("Truncated")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.92, green: 0.72, blue: 0.24))
+                    .foregroundStyle(Color.shellWarning)
             }
 
             Spacer()
@@ -365,7 +365,7 @@ struct FileBrowserScreen: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(Color(red: 0.11, green: 0.13, blue: 0.19))
+        .background(Color.shellElevated)
     }
 
     private var emptyEditorState: some View {
@@ -378,7 +378,7 @@ struct FileBrowserScreen: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: 0.05, green: 0.07, blue: 0.10))
+        .background(Color.shellDeepest)
     }
 
     private var editorFooter: some View {
@@ -390,20 +390,20 @@ struct FileBrowserScreen: View {
 
             Text(statusSummary)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(Color(red: 0.61, green: 0.67, blue: 0.73))
+                .foregroundStyle(Color.shellTextSecondary)
 
             Spacer()
 
             if let activeTabPath {
                 Text(activeTabPath)
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Color(red: 0.49, green: 0.54, blue: 0.61))
+                    .foregroundStyle(Color.shellTextMuted)
                     .lineLimit(1)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(red: 0.06, green: 0.08, blue: 0.12))
+        .background(Color.shellDeepest)
     }
 
     private var header: some View {
@@ -420,11 +420,11 @@ struct FileBrowserScreen: View {
 
                 Text("Agent Files")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.shellTextPrimary)
 
                 Text("Drag and drop files or folders from Finder into the list")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color(red: 0.58, green: 0.62, blue: 0.69))
+                    .foregroundStyle(Color.shellTextSecondary)
 
                 Button {
                     createFileNameDraft = ""
@@ -471,14 +471,14 @@ struct FileBrowserScreen: View {
                         }
                         .buttonStyle(.borderless)
                         .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(segment.path == currentPath ? .white : Color(red: 0.58, green: 0.62, blue: 0.69))
+                        .foregroundStyle(segment.path == currentPath ? Color.shellTextPrimary : Color.shellTextSecondary)
                     }
                 }
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color(red: 0.09, green: 0.11, blue: 0.16))
+        .background(Color.shellSurface)
     }
 
     private func fileRow(_ entry: AgentFileEntry, isSelected: Bool) -> some View {
@@ -528,7 +528,7 @@ struct FileBrowserScreen: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: 0.05, green: 0.07, blue: 0.10))
+        .background(Color.shellDeepest)
     }
 
     private var activeTabIndex: Int? {
@@ -957,12 +957,12 @@ struct FileBrowserScreen: View {
         }
         let lower = entry.name.lowercased()
         if lower.hasSuffix(".sh") || lower.hasSuffix(".py") || lower.hasSuffix(".js") || lower.hasSuffix(".ts") {
-            return Color(red: 0.35, green: 0.78, blue: 0.41)
+            return Color.shellRunning
         }
         if lower.hasSuffix(".yaml") || lower.hasSuffix(".yml") || lower.hasSuffix(".json") || lower.hasSuffix(".toml") || lower.hasSuffix(".env") {
-            return Color(red: 0.92, green: 0.72, blue: 0.24)
+            return Color.shellWarning
         }
-        return .secondary
+        return Color.shellTextSecondary
     }
 
     private func validatedEntryName(_ raw: String) -> String? {

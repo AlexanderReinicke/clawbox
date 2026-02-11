@@ -16,6 +16,10 @@ ClawNode is a macOS SwiftUI app that controls Apple `container` runtime and prov
 
 ## Core Components
 
+- `ClawMarket/ClawMarket/DesignSystem.swift`
+  - Single source of truth for UI design tokens.
+  - Adaptive semantic colors for both light/dark appearance.
+  - Shared spacing/radius/typography primitives for shell surfaces.
 - `ClawMarket/ClawMarket/Models/AgentManager.swift`
   - Source of truth for runtime/image/selected-container state.
   - Shell command execution with timeout + structured errors.

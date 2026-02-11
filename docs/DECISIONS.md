@@ -153,3 +153,17 @@
 - Consequence:
   - file editing workflow now supports parallel edits without reopening files repeatedly.
   - tab lifecycle (close/discard prompts/history) remains intentionally lightweight for now.
+
+## D-015: Centralize UI tokens in one adaptive design system
+
+- Status: accepted
+- Context: shell screens were using scattered hardcoded dark RGB values, which blocked a maintainable light-mode path.
+- Decision:
+  - add `ClawMarket/ClawMarket/DesignSystem.swift` as the single token source
+  - define semantic color tokens (surface, border, text, status, accent) with dynamic light/dark variants
+  - define reusable spacing/radius/typography token namespaces
+  - migrate shell views (`HomeView`, `FileBrowserScreen`) off local hardcoded colors onto shared tokens
+- Consequence:
+  - one place controls look-and-feel for both light and dark appearances
+  - shell UI now follows system appearance automatically without per-view overrides
+  - future visual changes are made by updating tokens, not individual views.

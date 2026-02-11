@@ -25,6 +25,17 @@ Deliver the first concrete implementation pass of the ClawNode orchestration she
   - status bar
 - Added design-token style color constants in `HomeView` for consistent dark-mode styling.
 
+### 1.1 Central design system (light + dark)
+
+- Added `ClawMarket/ClawMarket/DesignSystem.swift` as the centralized design-system layer.
+- Introduced shared token groups:
+  - semantic colors
+  - spacing
+  - radius
+  - typography
+- Replaced local view-level color constants/hardcoded RGB in shell surfaces with shared tokens.
+- Added adaptive light/dark color generation so shell UI follows system appearance in both modes.
+
 ### 2. Hierarchy and navigation model
 
 - Added project/agent hierarchy surface in sidebar:

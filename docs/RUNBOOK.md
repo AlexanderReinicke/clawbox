@@ -42,6 +42,9 @@ Expected: `apiserver is running`.
   - Ensure Dockerfile installs `openclaw` before `USER agent`.
   - Rebuild image and verify with:
     - `container exec -i claw-agent-1 /bin/bash -lc 'which openclaw && openclaw --version'`
+- Gateway shows `not detected` after restart:
+  - App start flow now auto-configures gateway mode/token + control-ui auth flags and starts gateway.
+  - For containers created before this fix, run `Recreate Agent` once so the new startup behavior is applied consistently.
 
 ## Logs
 

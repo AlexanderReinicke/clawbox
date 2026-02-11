@@ -112,6 +112,7 @@ final class AgentManager {
     var state: AgentState = .checking
     var lastCommandOutput: String = ""
     var lastErrorMessage: String?
+    private var hasEnsuredGatewayForCurrentRun = false
 
     init(autoSync: Bool = true) {
         prepareLogging()
@@ -142,6 +143,14 @@ final class AgentManager {
                 return
             }
             state = try await containerIsRunning() ? .running : .stopped
+            if state == .running {
+                if !hasEnsuredGatewayForCurrentRun {
+                    hasEnsuredGatewayForCurrentRun = true
+                    await ensureGatewayReadyAfterStart()
+                }
+            } else {
+                hasEnsuredGatewayForCurrentRun = false
+            }
         } catch {
             setError(error)
         }
@@ -238,6 +247,8 @@ final class AgentManager {
         }
         if try await containerIsRunning() {
             state = .running
+            await ensureGatewayReadyAfterStart()
+            hasEnsuredGatewayForCurrentRun = true
             return
         }
         if try await !containerExists() {
@@ -248,10 +259,14 @@ final class AgentManager {
         do {
             _ = try await shell("start", containerName)
             state = .running
+            await ensureGatewayReadyAfterStart()
+            hasEnsuredGatewayForCurrentRun = true
         } catch {
             let message = error.localizedDescription
             if message.localizedCaseInsensitiveContains("already running") {
                 state = .running
+                await ensureGatewayReadyAfterStart()
+                hasEnsuredGatewayForCurrentRun = true
             } else {
                 throw error
             }
@@ -288,6 +303,7 @@ final class AgentManager {
         }
         _ = try await shell("stop", containerName)
         state = .stopped
+        hasEnsuredGatewayForCurrentRun = false
     }
 
     func deleteContainer() async throws {
@@ -301,6 +317,7 @@ final class AgentManager {
             _ = try await shell("rm", containerName)
         }
         state = .needsContainer
+        hasEnsuredGatewayForCurrentRun = false
     }
 
     func deleteImage() async throws {
@@ -564,13 +581,19 @@ print(target)
 
     private func ensureDashboardGatewayRunning() async throws {
         let startGatewayScript = """
-if pgrep -f "[o]penclaw-gateway" >/dev/null 2>&1; then
+if curl -fsS --max-time 2 http://127.0.0.1:18789/ >/dev/null 2>&1; then
   echo "running"
 else
   export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=768}"
   nohup openclaw gateway --bind lan >/tmp/openclaw-gateway.log 2>&1 &
-  sleep 2
-  pgrep -f "[o]penclaw-gateway" >/dev/null 2>&1 && echo "started" || echo "failed"
+  for _ in 1 2 3 4 5; do
+    sleep 1
+    if curl -fsS --max-time 2 http://127.0.0.1:18789/ >/dev/null 2>&1; then
+      echo "started"
+      exit 0
+    fi
+  done
+  echo "failed"
 fi
 """
 
@@ -588,6 +611,9 @@ fi
 
     private func configureDashboardControlUIAccess() async throws {
         let configureScript = """
+openclaw config set gateway.mode local >/dev/null 2>&1 || true
+openclaw config set gateway.auth.token clawmarket-local >/dev/null 2>&1 || true
+openclaw config set gateway.remote.token clawmarket-local >/dev/null 2>&1 || true
 openclaw config set gateway.controlUi.allowInsecureAuth true --json >/dev/null 2>&1 || true
 openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true --json >/dev/null 2>&1 || true
 echo "configured"
@@ -596,6 +622,15 @@ echo "configured"
             ["exec", containerName, "/bin/bash", "-lc", configureScript],
             timeout: 90
         )
+    }
+
+    private func ensureGatewayReadyAfterStart() async {
+        do {
+            try await configureDashboardControlUIAccess()
+            try await ensureDashboardGatewayRunning()
+        } catch {
+            log("Gateway auto-start check failed: \(error.localizedDescription)")
+        }
     }
 
     private func resolvePublishedDashboardEndpoint() async throws -> DashboardEndpoint? {

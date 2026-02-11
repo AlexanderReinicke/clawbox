@@ -13,6 +13,9 @@ Integrated SwiftTerm terminal into app and attached it to container shell sessio
 - Terminal styling for readability and a focused ops-oriented look.
 - Termination callback and reconnect token flow.
 - Root debug view button to open terminal when container is running.
+- Large paste protection:
+  - custom terminal subclass throttles/chunks large clipboard pastes
+  - preserves bracketed paste wrappers to keep shell behavior correct.
 
 ## Why this design
 

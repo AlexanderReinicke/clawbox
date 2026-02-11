@@ -95,7 +95,7 @@ private struct TerminalProcessView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
-        let terminalView = LocalProcessTerminalView(frame: .zero)
+        let terminalView = ThrottledPasteTerminalView(frame: .zero)
         terminalView.processDelegate = context.coordinator
         terminalView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         terminalView.nativeBackgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1)
@@ -160,6 +160,58 @@ private struct TerminalProcessView: NSViewRepresentable {
         func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
         func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    }
+}
+
+@MainActor
+private final class ThrottledPasteTerminalView: LocalProcessTerminalView {
+    private var pasteTask: Task<Void, Never>?
+    private let pasteThrottleThresholdBytes = 2_048
+    private let pasteChunkBytes = 384
+    private let pasteChunkDelay = Duration.milliseconds(2)
+
+    deinit {
+        pasteTask?.cancel()
+    }
+
+    @objc
+    override func paste(_ sender: Any) {
+        let clipboard = NSPasteboard.general
+        guard let text = clipboard.string(forType: .string), !text.isEmpty else {
+            super.paste(sender)
+            return
+        }
+
+        let bytes = [UInt8](text.utf8)
+        guard bytes.count > pasteThrottleThresholdBytes else {
+            super.paste(sender)
+            return
+        }
+
+        pasteTask?.cancel()
+        let bracketedPasteEnabled = terminal.bracketedPasteMode
+
+        pasteTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if bracketedPasteEnabled {
+                self.send(data: EscapeSequences.bracketedPasteStart[0...])
+            }
+
+            var index = 0
+            while index < bytes.count && !Task.isCancelled {
+                let end = min(index + pasteChunkBytes, bytes.count)
+                self.send(data: bytes[index..<end])
+                index = end
+                if index < bytes.count {
+                    try? await Task.sleep(for: pasteChunkDelay)
+                }
+            }
+
+            if bracketedPasteEnabled {
+                self.send(data: EscapeSequences.bracketedPasteEnd[0...])
+            }
+        }
     }
 }
 

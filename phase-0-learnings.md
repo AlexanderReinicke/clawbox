@@ -27,7 +27,7 @@ Date: 2026-02-11
   - On Node 20, install may succeed but running `openclaw` fails with engine/version error.
 - Low-memory container defaults can trigger Node OOM on `openclaw` startup.
   - Observed: 1 GB container + default Node heap limit ~524 MB => immediate OOM.
-  - Fix: run container with `-m 2048M` and set `NODE_OPTIONS=--max-old-space-size=768`.
+  - Fix: run container with at least `-m 2048M` and set `NODE_OPTIONS=--max-old-space-size=768` (current app default is `-m 4096M`).
 - "Gateway not detected" is usually a local gateway process issue, not internet loss.
   - If no process listens on `127.0.0.1:18789`, status shows gateway unreachable.
   - If gateway binds loopback in-container, host Mac cannot reach it via container IP.
@@ -43,8 +43,8 @@ Date: 2026-02-11
 ## Recommended defaults going forward
 
 - Use Debian-based Node 22 image as baseline for ClawMarket default container.
-- Default to 2 GB memory (`-m 2048M`) for Phase 0 baseline.
-- Use 4 GB (`-m 4096M`) for heavier workloads or larger models.
+- Default to 4 GB memory (`-m 4096M`) for ClawMarket runtime stability.
+- Use 2 GB (`-m 2048M`) only for constrained environments with `NODE_OPTIONS` set.
 - Pin `openclaw` version in build/install steps:
   - `npm install -g openclaw@2026.2.9`
 - Keep container alive with:
@@ -139,7 +139,7 @@ Then restart gateway and prefer HTTPS or localhost path.
 ## Known-good Phase 0 command sequence
 
 ```bash
-container run -d --name lifecycle-test -m 2048M node:22-bookworm-slim sleep infinity
+container run -d --name lifecycle-test -m 4096M node:22-bookworm-slim sleep infinity
 container exec -i -t lifecycle-test /bin/sh -lc \
   'apt-get update && apt-get install -y git python3 make g++ cmake && npm install -g openclaw@2026.2.9 && export NODE_OPTIONS=--max-old-space-size=768 && openclaw --version && echo "persistence test" > /root/test.txt'
 container stop lifecycle-test
@@ -161,3 +161,4 @@ openclaw gateway --bind lan
 
 - `ClawMarket/Resources/Dockerfile` should use `node:22-bookworm-slim`, install build deps, install `openclaw@2026.2.9`, and set `NODE_OPTIONS`.
 - This removes Alpine-specific blockers and makes setup reproducible.
+- `ClawMarket/ClawMarket/Models/AgentManager.swift` default memory is now `4096M` to match the stable baseline.

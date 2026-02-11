@@ -169,27 +169,51 @@ private final class ThrottledPasteTerminalView: LocalProcessTerminalView {
     private let pasteThrottleThresholdBytes = 2_048
     private let pasteChunkBytes = 384
     private let pasteChunkDelay = Duration.milliseconds(2)
+    private let trimTrailingNewlineOnPaste = true
 
     deinit {
         pasteTask?.cancel()
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isCommandV = flags.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "v"
+        if isCommandV {
+            paste(self)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     @objc
     override func paste(_ sender: Any) {
         let clipboard = NSPasteboard.general
-        guard let text = clipboard.string(forType: .string), !text.isEmpty else {
+        let text = clipboard.string(forType: .string)
+            ?? clipboard.pasteboardItems?.first?.string(forType: .string)
+        guard let text, !text.isEmpty else {
             super.paste(sender)
             return
         }
 
-        let bytes = [UInt8](text.utf8)
-        guard bytes.count > pasteThrottleThresholdBytes else {
-            super.paste(sender)
+        let normalizedText = normalizePastedText(text)
+        guard !normalizedText.isEmpty else {
             return
         }
 
         pasteTask?.cancel()
         let bracketedPasteEnabled = terminal.bracketedPasteMode
+        let bytes = [UInt8](normalizedText.utf8)
+
+        guard bytes.count > pasteThrottleThresholdBytes else {
+            if bracketedPasteEnabled {
+                send(data: EscapeSequences.bracketedPasteStart[0...])
+            }
+            send(data: bytes[0...])
+            if bracketedPasteEnabled {
+                send(data: EscapeSequences.bracketedPasteEnd[0...])
+            }
+            return
+        }
 
         pasteTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -212,6 +236,24 @@ private final class ThrottledPasteTerminalView: LocalProcessTerminalView {
                 self.send(data: EscapeSequences.bracketedPasteEnd[0...])
             }
         }
+    }
+
+    private func normalizePastedText(_ text: String) -> String {
+        var normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        if trimTrailingNewlineOnPaste {
+            normalized = stripTrailingNewlines(normalized)
+        }
+        return normalized
+    }
+
+    private func stripTrailingNewlines(_ text: String) -> String {
+        var trimmed = text
+        while trimmed.hasSuffix("\n") {
+            trimmed.removeLast()
+        }
+        return trimmed
     }
 }
 

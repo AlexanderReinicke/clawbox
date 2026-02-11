@@ -34,7 +34,7 @@ ClawMarket is a macOS SwiftUI app that controls Apple `container` runtime and pr
 
 - App Sandbox is disabled intentionally so app can execute system CLI.
 - Hardened Runtime is enabled to support notarized direct distribution path.
-- Default container memory baseline is `2048M` with `NODE_OPTIONS=--max-old-space-size=768`.
+- Default container memory baseline is `4096M`; use `2048M` only as a constrained fallback with `NODE_OPTIONS=--max-old-space-size=768`.
 
 ## Planned Evolution
 

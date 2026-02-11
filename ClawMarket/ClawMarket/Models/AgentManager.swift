@@ -49,7 +49,7 @@ final class AgentManager {
     let imageTag = "clawmarket/default:latest"
     let imageName = "clawmarket/default"
     let containerName = "claw-agent-1"
-    let containerMemory = "2048M"
+    let containerMemory = "4096M"
     let runtimeInstallerURL = URL(string: "https://github.com/apple/container/releases/download/0.9.0/container-installer-signed.pkg")!
     let logMaxBytes = 1_000_000
 

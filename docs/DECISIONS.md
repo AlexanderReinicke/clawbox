@@ -7,12 +7,12 @@
 - Decision: use `node:22-bookworm-slim` and pin `openclaw@2026.2.9`.
 - Consequence: larger base image than Alpine, but stable install/runtime.
 
-## D-002: Default container memory baseline is 2 GB
+## D-002: Default container memory baseline is 4 GB
 
 - Status: accepted
 - Context: low-memory containers can OOM during `openclaw` startup.
-- Decision: set `-m 2048M` for baseline; recommend `-m 4096M` for heavier workloads.
-- Consequence: higher default memory footprint but significantly better startup stability.
+- Decision: set `-m 4096M` for baseline; keep `-m 2048M` as fallback only when host constraints require it.
+- Consequence: higher default memory footprint but significantly better startup stability and fewer runtime crashes.
 
 ## D-003: Build app control plane around shelling out to `container` CLI
 

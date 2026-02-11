@@ -41,7 +41,7 @@
 
 - `openclaw` on Alpine is unreliable due to native/toolchain + glibc expectations.
 - Default image should be Debian + Node 22 for reliable `openclaw` installs.
-- Low-memory containers can OOM on startup; baseline is `-m 2048M` plus `NODE_OPTIONS`, with `-m 4096M` for heavier workloads.
+- Low-memory containers can OOM on startup; baseline is `-m 4096M`, with `-m 2048M` only as constrained fallback plus `NODE_OPTIONS`.
 - See `phase-0-learnings.md` for full known-good commands and rationale.
 
 ## Quick Recovery Checklist
@@ -50,7 +50,7 @@
 
 ```bash
 container rm lifecycle-test 2>/dev/null || true
-container run -d --name lifecycle-test -m 2048M node:22-bookworm-slim sleep infinity
+container run -d --name lifecycle-test -m 4096M node:22-bookworm-slim sleep infinity
 container exec -i lifecycle-test bash -lc 'apt-get update && apt-get install -y git python3 make g++ cmake'
 container exec -i lifecycle-test bash -lc 'npm install -g openclaw@2026.2.9'
 ```

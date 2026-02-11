@@ -49,12 +49,12 @@ Use Node 22 on Debian. `openclaw` currently requires Node >= 22.12.0.
 
 ```bash
 container rm lifecycle-test 2>/dev/null || true
-container run -d --name lifecycle-test -m 2048M node:22-bookworm-slim sleep infinity
+container run -d --name lifecycle-test -m 4096M node:22-bookworm-slim sleep infinity
 container ls -a
 container exec -i -t lifecycle-test /bin/sh
 ```
 
-Use `-m 4096M` if you plan heavier OpenClaw workloads.
+Use `-m 2048M` only if host memory is constrained.
 
 Inside shell:
 

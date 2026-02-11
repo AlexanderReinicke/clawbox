@@ -8,7 +8,7 @@ A macOS SwiftUI app that lets users launch a persistent, isolated Linux containe
 
 ### Key Risks / Constraints (from Phase 0 validation)
 - **Base image/runtime compatibility:** `openclaw` is not reliable on Alpine for our use case; default image should be Debian-based (`node:22-bookworm-slim`) with `openclaw` pinned (currently `openclaw@2026.2.9`).
-- **Container memory requirements:** low-memory containers can crash `openclaw` with Node OOM; default agent container to `-m 2048M` (Phase 0 baseline), set `NODE_OPTIONS=--max-old-space-size=768`, and use `-m 4096M` for heavier workloads.
+- **Container memory requirements:** low-memory containers can crash `openclaw` with Node OOM; default agent container to `-m 4096M`, set `NODE_OPTIONS=--max-old-space-size=768`, and use `-m 2048M` only as constrained fallback.
 - **Runtime installation permissions:** initial `container` CLI install and first kernel setup require admin privileges and explicit first-run setup UX.
 - **Gateway auth + browser security context:** Control UI over non-`localhost` HTTP can fail with secure-context/device-auth errors; app must handle token/auth flow and recommended connection mode explicitly.
 - **Distribution model constraint:** architecture fits notarized direct distribution (outside App Store); Mac App Store sandboxing is a likely blocker for shelling out to `container`.

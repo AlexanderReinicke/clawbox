@@ -10,6 +10,8 @@ This folder explains what the app does, why specific implementation decisions we
   - Short architecture decision records (ADRs) with rationale and tradeoffs.
 - `docs/RUNBOOK.md`
   - Operator/developer runbook for local setup, build, and verification.
+- `docs/DISTRIBUTION.md`
+  - Packaging, signing, and distribution workflow.
 - `docs/PHASES/phase-01-agent-manager.md`
   - Phase 1 implementation details and validation.
 - `docs/PHASES/phase-02-terminal.md`
@@ -23,7 +25,7 @@ This folder explains what the app does, why specific implementation decisions we
 - `docs/PHASES/phase-06-errors-polish.md`
   - Placeholder for Phase 6.
 - `docs/PHASES/phase-07-packaging.md`
-  - Placeholder for Phase 7.
+  - Phase 7 packaging implementation details.
 
 ## Documentation Rules
 

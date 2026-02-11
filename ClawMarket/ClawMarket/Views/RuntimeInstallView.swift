@@ -29,7 +29,7 @@ struct RuntimeInstallView: View {
                 VStack(spacing: 10) {
                     Text("Install Apple Container Runtime")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text("ClawMarket needs Apple's container runtime to run agents on your Mac.")
+                    Text("ClawNode needs Apple's container runtime to run agents on your Mac.")
                         .font(.system(size: 16, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

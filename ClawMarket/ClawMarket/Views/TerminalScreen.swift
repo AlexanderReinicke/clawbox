@@ -4,6 +4,7 @@ import AppKit
 
 struct TerminalScreen: View {
     let containerName: String
+    let agentLabel: String
     var onBack: (() -> Void)?
 
     @State private var reconnectToken = UUID()
@@ -15,6 +16,7 @@ struct TerminalScreen: View {
             ZStack {
                 TerminalProcessView(
                     containerName: containerName,
+                    agentLabel: agentLabel,
                     reconnectToken: reconnectToken
                 ) { exitCode in
                     disconnectedReason = "Terminal session ended (exit code: \(exitCode.map(String.init) ?? "n/a"))."
@@ -41,7 +43,7 @@ struct TerminalScreen: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Agent Terminal")
                     .font(.headline.weight(.semibold))
-                Text(containerName)
+                Text("\(agentLabel) • \(containerName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -87,6 +89,7 @@ struct TerminalScreen: View {
 
 private struct TerminalProcessView: NSViewRepresentable {
     let containerName: String
+    let agentLabel: String
     let reconnectToken: UUID
     let onProcessTerminated: (Int32?) -> Void
 
@@ -103,13 +106,13 @@ private struct TerminalProcessView: NSViewRepresentable {
         terminalView.caretColor = .systemGreen
         terminalView.optionAsMetaKey = true
         context.coordinator.attach(view: terminalView)
-        context.coordinator.connect(containerName: containerName, reconnectToken: reconnectToken)
+        context.coordinator.connect(containerName: containerName, agentLabel: agentLabel, reconnectToken: reconnectToken)
         return terminalView
     }
 
     func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
         context.coordinator.attach(view: nsView)
-        context.coordinator.connect(containerName: containerName, reconnectToken: reconnectToken)
+        context.coordinator.connect(containerName: containerName, agentLabel: agentLabel, reconnectToken: reconnectToken)
     }
 
     static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
@@ -120,6 +123,7 @@ private struct TerminalProcessView: NSViewRepresentable {
         private weak var view: LocalProcessTerminalView?
         private var currentReconnectToken: UUID?
         private var currentContainerName: String = ""
+        private var currentAgentLabel: String = ""
         private let onProcessTerminated: (Int32?) -> Void
 
         init(onProcessTerminated: @escaping (Int32?) -> Void) {
@@ -131,10 +135,11 @@ private struct TerminalProcessView: NSViewRepresentable {
             view.processDelegate = self
         }
 
-        func connect(containerName: String, reconnectToken: UUID) {
+        func connect(containerName: String, agentLabel: String, reconnectToken: UUID) {
             guard
                 currentReconnectToken != reconnectToken ||
                 currentContainerName != containerName ||
+                currentAgentLabel != agentLabel ||
                 view?.process.running == false
             else {
                 return
@@ -142,15 +147,31 @@ private struct TerminalProcessView: NSViewRepresentable {
 
             currentReconnectToken = reconnectToken
             currentContainerName = containerName
+            currentAgentLabel = agentLabel
 
             if view?.process.running == true {
                 view?.terminate()
             }
 
+            let promptLabel = shellPromptLabel(agentLabel: agentLabel, containerName: containerName)
+            let bootstrapCommand = #"export PS1="${CLAWNODE_AGENT_LABEL}@\h:\w\$ "; exec /bin/bash -i"#
             view?.startProcess(
                 executable: "/usr/local/bin/container",
-                args: ["exec", "-i", "-t", containerName, "/bin/bash"]
+                args: [
+                    "exec", "-i", "-t",
+                    "--env", "CLAWNODE_AGENT_LABEL=\(promptLabel)",
+                    containerName,
+                    "/bin/bash", "-lc", bootstrapCommand
+                ]
             )
+        }
+
+        private func shellPromptLabel(agentLabel: String, containerName: String) -> String {
+            let trimmed = agentLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return containerName.replacingOccurrences(of: " ", with: "-").lowercased()
+            }
+            return trimmed.replacingOccurrences(of: " ", with: "").lowercased()
         }
 
         func processTerminated(source: TerminalView, exitCode: Int32?) {
@@ -258,5 +279,5 @@ private final class ThrottledPasteTerminalView: LocalProcessTerminalView {
 }
 
 #Preview {
-    TerminalScreen(containerName: "claw-agent-1")
+    TerminalScreen(containerName: "claw-agent-1", agentLabel: "Agent 1")
 }

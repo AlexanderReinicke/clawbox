@@ -2,15 +2,21 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct FileBrowserScreen: View {
+    private struct BannerMessage {
+        let text: String
+        let color: Color
+    }
+
     let manager: AgentManager
     var onBack: (() -> Void)?
+    var onLocationChanged: ((String, String?) -> Void)?
 
     @State private var currentPath: String
     @State private var entries: [AgentFileEntry] = []
     @State private var isLoading = false
     @State private var listingErrorMessage: String?
-    @State private var uploadStatusMessage: String?
-    @State private var uploadErrorMessage: String?
+    @State private var activeBanner: BannerMessage?
+    @State private var bannerDismissTask: Task<Void, Never>?
     @State private var isDropTargeted = false
     @State private var isUploading = false
 
@@ -20,10 +26,20 @@ struct FileBrowserScreen: View {
     @State private var isPreviewLoading = false
     @State private var previewErrorMessage: String?
 
-    init(manager: AgentManager, onBack: (() -> Void)? = nil) {
+    @State private var editorText = ""
+    @State private var savedEditorText = ""
+    @State private var isSaving = false
+
+    init(
+        manager: AgentManager,
+        initialPath: String? = nil,
+        onBack: (() -> Void)? = nil,
+        onLocationChanged: ((String, String?) -> Void)? = nil
+    ) {
         self.manager = manager
         self.onBack = onBack
-        _currentPath = State(initialValue: manager.defaultBrowsePath)
+        self.onLocationChanged = onLocationChanged
+        _currentPath = State(initialValue: initialPath ?? manager.defaultBrowsePath)
     }
 
     var body: some View {
@@ -35,49 +51,51 @@ struct FileBrowserScreen: View {
                 ProgressView("Loading \(currentPath)")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let listingErrorMessage, entries.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.orange)
-                    Text(listingErrorMessage)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                    Button("Retry") {
-                        Task { await loadCurrentPath() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                errorState(message: listingErrorMessage)
             } else {
                 contentSplitView
             }
         }
-        .frame(minWidth: 760, minHeight: 520)
-        .background(Color(NSColor.windowBackgroundColor))
+        .frame(minWidth: 860, minHeight: 560)
+        .background(Color(red: 0.06, green: 0.08, blue: 0.12))
         .overlay(alignment: .bottom) {
             if let banner = activeBanner {
-                Text(banner.text)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(.white)
-                    .background(banner.color, in: Capsule())
-                    .padding(.bottom, 12)
+                HStack(spacing: 8) {
+                    Image(systemName: banner.color == .red ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    Text(banner.text)
+                }
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .foregroundStyle(.white)
+                .background(banner.color.opacity(0.95), in: Capsule())
+                .padding(.bottom, 10)
             }
         }
         .task(id: currentPath) {
             await loadCurrentPath()
+        }
+        .onAppear {
+            emitLocationChange()
+        }
+        .onChange(of: currentPath) { _, _ in
+            emitLocationChange()
+        }
+        .onChange(of: selectedFilePath) { _, _ in
+            emitLocationChange()
+        }
+        .onDisappear {
+            dismissBanner()
         }
     }
 
     private var contentSplitView: some View {
         HSplitView {
             leftPane
-                .frame(minWidth: 280, idealWidth: 430)
+                .frame(minWidth: 320, idealWidth: 420)
 
-            previewPane
-                .frame(minWidth: 260, idealWidth: 330)
+            editorPane
+                .frame(minWidth: 380, idealWidth: 540)
         }
     }
 
@@ -101,7 +119,7 @@ struct FileBrowserScreen: View {
             }
 
             if isUploading {
-                Color.black.opacity(0.08)
+                Color.black.opacity(0.2)
                     .ignoresSafeArea()
                 ProgressView("Uploading to \(currentPath)")
                     .padding(.horizontal, 16)
@@ -112,75 +130,122 @@ struct FileBrowserScreen: View {
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: handleDroppedItems)
     }
 
-    private var previewPane: some View {
+    private var editorPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let selectedFilePath, let selectedFileName {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(selectedFileName)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    Text(selectedFilePath)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            editorHeader
+            Divider()
 
-                    HStack(spacing: 10) {
-                        if let preview, preview.truncated {
-                            Label("Preview truncated", systemImage: "scissors")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        if let preview, preview.binary {
-                            Label("Binary data detected", systemImage: "waveform.path")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-
-                Divider()
-
-                if isPreviewLoading {
-                    ProgressView("Loading file preview...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let previewErrorMessage {
-                    VStack(spacing: 10) {
-                        Image(systemName: "doc.badge.exclamationmark")
-                            .font(.system(size: 24))
-                            .foregroundStyle(.orange)
-                        Text(previewErrorMessage)
-                            .font(.subheadline)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(20)
+            if selectedFilePath == nil {
+                emptyEditorState
+            } else if isPreviewLoading {
+                ProgressView("Loading file...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        Text(preview?.text ?? "")
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                    }
-                }
+            } else if let previewErrorMessage {
+                errorState(message: previewErrorMessage)
             } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.secondary)
-                    Text("Select a file to preview")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TextEditor(text: $editorText)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .background(Color(red: 0.05, green: 0.07, blue: 0.10))
+                    .foregroundStyle(Color(red: 0.90, green: 0.93, blue: 0.96))
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            }
+
+            Divider()
+            editorFooter
+        }
+        .background(Color(red: 0.08, green: 0.10, blue: 0.14))
+    }
+
+    private var editorHeader: some View {
+        HStack(spacing: 10) {
+            if let selectedFileName {
+                Text(selectedFileName)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            } else {
+                Text("Editor")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+
+            if isModified {
+                Text("● Modified")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.82, green: 0.63, blue: 0.17))
+            }
+
+            if isReadOnly {
+                Text("Read-only")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await saveCurrentFile(restartAfterSave: false) }
+            } label: {
+                Label("Save", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canSave)
+
+            Button {
+                Task { await saveCurrentFile(restartAfterSave: true) }
+            } label: {
+                Label("Save & Restart", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canSave)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color(red: 0.11, green: 0.13, blue: 0.19))
+    }
+
+    private var emptyEditorState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 24))
+                .foregroundStyle(.secondary)
+            Text("Select a file to edit")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(red: 0.05, green: 0.07, blue: 0.10))
+    }
+
+    private var editorFooter: some View {
+        HStack(spacing: 10) {
+            if isSaving {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text(statusSummary)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(Color(red: 0.61, green: 0.67, blue: 0.73))
+
+            Spacer()
+
+            if let selectedFilePath {
+                Text(selectedFilePath)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(Color(red: 0.49, green: 0.54, blue: 0.61))
+                    .lineLimit(1)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(red: 0.06, green: 0.08, blue: 0.12))
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 if let onBack {
                     Button {
@@ -188,14 +253,16 @@ struct FileBrowserScreen: View {
                     } label: {
                         Label("Back", systemImage: "chevron.left")
                     }
+                    .buttonStyle(.bordered)
                 }
 
                 Text("Agent Files")
-                    .font(.headline)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
 
-                Text("Drop files or folders from Finder to upload into this folder")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("Drag and drop files or folders from Finder into the list")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color(red: 0.58, green: 0.62, blue: 0.69))
 
                 Spacer()
 
@@ -204,6 +271,7 @@ struct FileBrowserScreen: View {
                 } label: {
                     Label("Up", systemImage: "arrow.up")
                 }
+                .buttonStyle(.bordered)
                 .disabled(currentPath == "/")
 
                 Button {
@@ -211,6 +279,7 @@ struct FileBrowserScreen: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .buttonStyle(.bordered)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -221,33 +290,29 @@ struct FileBrowserScreen: View {
                         }
                         .buttonStyle(.borderless)
                         .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(segment.path == currentPath ? .primary : .secondary)
+                        .foregroundStyle(segment.path == currentPath ? .white : Color(red: 0.58, green: 0.62, blue: 0.69))
                     }
                 }
             }
-
-            Text(currentPath)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color(red: 0.09, green: 0.11, blue: 0.16))
     }
 
     private func fileRow(_ entry: AgentFileEntry, isSelected: Bool) -> some View {
         HStack(spacing: 12) {
             Image(systemName: iconName(for: entry.kind))
-                .foregroundStyle(entry.isDirectory ? .blue : .secondary)
+                .foregroundStyle(iconColor(for: entry))
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name)
                     .font(.system(.body, design: .monospaced))
                     .lineLimit(1)
-                Text(entry.path)
+                Text(relativeTimestamp(for: entry.modified))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
 
             Spacer()
@@ -257,18 +322,60 @@ struct FileBrowserScreen: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Text(Self.modifiedFormatter.string(from: Date(timeIntervalSince1970: entry.modified)))
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
+                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
         )
         .contentShape(Rectangle())
+    }
+
+    private func errorState(message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 26))
+                .foregroundStyle(.orange)
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Button("Retry") {
+                Task { await loadCurrentPath() }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(red: 0.05, green: 0.07, blue: 0.10))
+    }
+
+    private var isReadOnly: Bool {
+        preview?.binary == true
+    }
+
+    private var isModified: Bool {
+        selectedFilePath != nil && !isReadOnly && editorText != savedEditorText
+    }
+
+    private var canSave: Bool {
+        selectedFilePath != nil && !isReadOnly && isModified && !isSaving
+    }
+
+    private var statusSummary: String {
+        if let preview, preview.binary {
+            return "Binary file (read-only preview)"
+        }
+        if isSaving {
+            return "Saving..."
+        }
+        if isModified {
+            return "Modified"
+        }
+        if selectedFilePath != nil {
+            return "Saved"
+        }
+        return "No file selected"
     }
 
     private func handleEntryTap(_ entry: AgentFileEntry) {
@@ -281,6 +388,8 @@ struct FileBrowserScreen: View {
         selectedFileName = entry.name
         preview = nil
         previewErrorMessage = nil
+        editorText = ""
+        savedEditorText = ""
         Task {
             await loadPreview(path: entry.path)
         }
@@ -304,6 +413,8 @@ struct FileBrowserScreen: View {
         selectedFileName = nil
         preview = nil
         previewErrorMessage = nil
+        editorText = ""
+        savedEditorText = ""
     }
 
     private func loadCurrentPath() async {
@@ -321,6 +432,9 @@ struct FileBrowserScreen: View {
             }
         } catch {
             listingErrorMessage = error.localizedDescription
+            if !entries.isEmpty {
+                presentBanner("Refresh failed: \(error.localizedDescription)", isError: true)
+            }
         }
     }
 
@@ -334,27 +448,43 @@ struct FileBrowserScreen: View {
                 return
             }
             self.preview = preview
+            self.editorText = preview.text
+            self.savedEditorText = preview.text
             self.previewErrorMessage = nil
         } catch {
             guard selectedFilePath == path else {
                 return
             }
             self.preview = nil
+            self.editorText = ""
+            self.savedEditorText = ""
             self.previewErrorMessage = error.localizedDescription
         }
     }
 
-    private var activeBanner: (text: String, color: Color)? {
-        if let uploadErrorMessage {
-            return (uploadErrorMessage, .red.opacity(0.9))
+    private func saveCurrentFile(restartAfterSave: Bool) async {
+        guard let selectedFilePath else {
+            return
         }
-        if let listingErrorMessage, !entries.isEmpty {
-            return (listingErrorMessage, .red.opacity(0.9))
+        guard canSave else {
+            return
         }
-        if let uploadStatusMessage {
-            return (uploadStatusMessage, .green.opacity(0.9))
+
+        isSaving = true
+        defer { isSaving = false }
+
+        do {
+            try await manager.writeFile(path: selectedFilePath, text: editorText)
+            savedEditorText = editorText
+            presentBanner("Saved \(selectedFilePath)", isError: false)
+
+            if restartAfterSave {
+                try await manager.restartContainer()
+                presentBanner("Saved and restarted agent", isError: false)
+            }
+        } catch {
+            presentBanner("Save failed: \(error.localizedDescription)", isError: true)
         }
-        return nil
     }
 
     private func handleDroppedItems(_ providers: [NSItemProvider]) -> Bool {
@@ -370,13 +500,12 @@ struct FileBrowserScreen: View {
 
     private func importDroppedItems(from providers: [NSItemProvider]) async {
         isUploading = true
-        uploadErrorMessage = nil
-        uploadStatusMessage = nil
+        dismissBanner()
 
         let urls = await resolveDroppedURLs(from: providers)
         guard !urls.isEmpty else {
             isUploading = false
-            uploadErrorMessage = "Drop did not include any readable local URLs."
+            presentBanner("Drop did not include any readable local URLs.", isError: true)
             return
         }
 
@@ -401,14 +530,23 @@ struct FileBrowserScreen: View {
         await loadCurrentPath()
         isUploading = false
 
-        if uploadedFiles > 0 || uploadedDirectories > 0 {
-            uploadStatusMessage = uploadSummary(files: uploadedFiles, directories: uploadedDirectories)
-        }
         if !failures.isEmpty {
             let first = failures[0]
-            uploadErrorMessage = failures.count == 1
-                ? "Upload failed: \(first)"
-                : "Upload failed for \(failures.count) items. First error: \(first)"
+            if uploadedFiles > 0 || uploadedDirectories > 0 {
+                presentBanner(
+                    "Uploaded with issues. \(uploadSummary(files: uploadedFiles, directories: uploadedDirectories)). First error: \(first)",
+                    isError: true
+                )
+            } else {
+                presentBanner(
+                    failures.count == 1
+                        ? "Upload failed: \(first)"
+                        : "Upload failed for \(failures.count) items. First error: \(first)",
+                    isError: true
+                )
+            }
+        } else if uploadedFiles > 0 || uploadedDirectories > 0 {
+            presentBanner(uploadSummary(files: uploadedFiles, directories: uploadedDirectories), isError: false)
         }
     }
 
@@ -484,6 +622,59 @@ struct FileBrowserScreen: View {
         }
     }
 
+    private func iconColor(for entry: AgentFileEntry) -> Color {
+        if entry.isDirectory {
+            return .blue
+        }
+        let lower = entry.name.lowercased()
+        if lower.hasSuffix(".sh") || lower.hasSuffix(".py") || lower.hasSuffix(".js") || lower.hasSuffix(".ts") {
+            return Color(red: 0.35, green: 0.78, blue: 0.41)
+        }
+        if lower.hasSuffix(".yaml") || lower.hasSuffix(".yml") || lower.hasSuffix(".json") || lower.hasSuffix(".toml") || lower.hasSuffix(".env") {
+            return Color(red: 0.92, green: 0.72, blue: 0.24)
+        }
+        return .secondary
+    }
+
+    private func relativeTimestamp(for unix: TimeInterval) -> String {
+        let date = Date(timeIntervalSince1970: unix)
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .abbreviated
+        let delta = Date().timeIntervalSince(date)
+        if delta < 24 * 60 * 60 {
+            return relative.localizedString(for: date, relativeTo: Date())
+        }
+        return Self.modifiedFormatter.string(from: date)
+    }
+
+    private func presentBanner(_ text: String, isError: Bool) {
+        bannerDismissTask?.cancel()
+        activeBanner = BannerMessage(
+            text: text,
+            color: isError ? .red : .green
+        )
+
+        bannerDismissTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(isError ? 8 : 5))
+            } catch {
+                return
+            }
+            activeBanner = nil
+            bannerDismissTask = nil
+        }
+    }
+
+    private func dismissBanner() {
+        bannerDismissTask?.cancel()
+        bannerDismissTask = nil
+        activeBanner = nil
+    }
+
+    private func emitLocationChange() {
+        onLocationChanged?(currentPath, selectedFilePath)
+    }
+
     private static let byteCountFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
@@ -492,8 +683,8 @@ struct FileBrowserScreen: View {
 
     private static let modifiedFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
         return formatter
     }()
 }

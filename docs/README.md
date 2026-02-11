@@ -26,6 +26,8 @@ This folder explains what the app does, why specific implementation decisions we
   - Placeholder for Phase 6.
 - `docs/PHASES/phase-07-packaging.md`
   - Phase 7 packaging implementation details.
+- `docs/PHASES/phase-08-orchestration-shell.md`
+  - Phase 8 orchestration shell foundation aligned to spec v2.
 
 ## Documentation Rules
 

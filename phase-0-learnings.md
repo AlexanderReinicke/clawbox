@@ -40,6 +40,13 @@ Date: 2026-02-11
   - `disconnected (1008): device identity required`
   - Root cause: accessing Control UI via `http://<container-ip>:18789` is not localhost/HTTPS; browser client must provide shared auth and/or device identity unless explicitly relaxed.
 
+## Topology clarification (important)
+
+- Apple `container` is not Docker-style "many containers inside one Linux VM".
+- In Apple `container`, each running container has its own lightweight VM boundary.
+- For ClawNode UX, "agent slots" must map to separate container names (`claw-agent-1`, `claw-agent-2`, ...), not multiple agents inside one container.
+- Terminal, file browser, dashboard, and delete actions should always target the currently selected slot/container.
+
 ## Recommended defaults going forward
 
 - Use Debian-based Node 22 image as baseline for ClawMarket default container.
@@ -51,8 +58,8 @@ Date: 2026-02-11
   - `sleep infinity`
 - Bake `NODE_OPTIONS=--max-old-space-size=768` into image env.
 - For host-browser access, publish dashboard port and prefer localhost:
-  - container create should include `-p 127.0.0.1:18789:18789`
-  - app should open `http://127.0.0.1:18789`
+  - container create should publish unique localhost ports per slot (for example slot 1 -> `127.0.0.1:18789:18789`, slot 2 -> `127.0.0.1:18790:18789`)
+  - app should open selected slot localhost URL
   - keep container-IP fallback only for legacy containers without port mapping
 - Keep a documented dev-only fallback for Control UI auth friction:
   - `gateway.controlUi.allowInsecureAuth=true`
@@ -166,7 +173,12 @@ openclaw gateway --bind lan
 - This removes Alpine-specific blockers and makes setup reproducible.
 - `ClawMarket/ClawMarket/Models/AgentManager.swift` default memory is now `4096M` to match the stable baseline.
 - `ClawMarket/ClawMarket/Models/AgentManager.swift` dashboard flow now:
-  - creates new containers with published port `127.0.0.1:18789:18789`
+  - creates new containers with per-slot localhost dashboard ports
   - auto-sets `gateway.controlUi.allowInsecureAuth=true`
   - auto-sets `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
   - starts gateway with robust process detection (`pgrep -x openclaw-gateway`)
+- Multi-agent UI implementation note:
+  - slot selection maps to a real container target (`claw-agent-N`) at runtime,
+  - slot runtime states are read from `container ls` / `container ls -a`,
+  - app-level "container group" is a logical grouping layer, not a nested runtime container,
+  - access-folder mount configuration is stored per-agent slot and applied only when that slot is created/recreated.

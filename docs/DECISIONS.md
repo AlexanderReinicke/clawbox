@@ -49,8 +49,8 @@
   - `disconnected (1008): control ui requires HTTPS or localhost (secure context)`
   - `disconnected (1008): device identity required`
 - Decision:
-  - Create containers with `-p 127.0.0.1:18789:18789`.
-  - Prefer `http://127.0.0.1:18789` for dashboard launch.
+  - Create containers with localhost-published dashboard ports per slot (for example `claw-agent-1` => `127.0.0.1:18789`, `claw-agent-2` => `127.0.0.1:18790`).
+  - Prefer `http://127.0.0.1:<slot-port>` for dashboard launch based on selected agent slot.
   - During dashboard startup, auto-apply:
     - `gateway.controlUi.allowInsecureAuth=true`
     - `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
@@ -58,3 +58,57 @@
 - Consequence:
   - Dashboard launch is stable and no longer depends on direct container-IP browsing.
   - Local/dev security posture is relaxed for UX stability and should be revisited before production hardening.
+
+## D-008: Represent multi-agent capacity as a logical group, with one real container per agent slot
+
+- Status: accepted
+- Context: Apple `container` provides lightweight VM isolation per container. It does not provide a model where multiple runtime containers share one Linux VM boundary in the same way Docker Desktop commonly presents.
+- Decision:
+  - Keep one app-level "container group" for UX and capacity planning.
+  - Map each agent slot to one real container name (`claw-agent-N`).
+  - Route terminal/files/dashboard/delete actions to the currently selected slot/container.
+- Consequence:
+  - Multi-agent behavior is technically accurate to Apple runtime semantics.
+  - Resource usage scales per running slot/container and must be surfaced clearly in UI.
+
+## D-009: Adopt IDE-style orchestration shell as primary app surface
+
+- Status: accepted
+- Context: The existing card-based interface made project/agent context ambiguous and did not scale for deeper workflows (files, shell, dashboards, config).
+- Decision: move to a persistent shell model with:
+  - title bar
+  - breadcrumb bar
+  - tab bar
+  - hierarchy sidebar
+  - content pane
+  - status bar
+- Consequence:
+  - navigation context is always visible
+  - shell/files/dashboard/config flows are unified in one surface
+  - implementation complexity increases, but extensibility for future phases is materially better.
+
+## D-010: Implement in-app file editing with save + restart against container filesystem
+
+- Status: accepted
+- Context: preview-only files were insufficient for operational workflows; users need direct edits inside agent runtime context.
+- Decision:
+  - add `AgentManager.writeFile(path:text:)`
+  - add `AgentManager.restartContainer()`
+  - upgrade file browser to editable text workflow with modified state, save, and save+restart.
+- Consequence:
+  - ClawNode now supports direct runtime-side file edits without leaving the app.
+  - richer editor features (multi-tab/diff/minimap) remain future enhancements.
+
+## D-011: Model sub-agents as logical entities within a parent agent container
+
+- Status: accepted
+- Context: users need a visible hierarchy and per-sub-agent workflows, but Apple `container` maps each real container to its own lightweight VM boundary and does not provide "sub-container in same VM" semantics for this use case.
+- Decision:
+  - persist sub-agents as metadata under a parent agent slot
+  - render them as nested entities in sidebar/breadcrumb/content views
+  - route shell/files/dashboard actions through the parent container context
+  - treat sub-agent workspace as scoped paths (for example `/home/agent/subagents/<id>`)
+- Consequence:
+  - UX gains multi-entity orchestration without multiplying VM instances
+  - sub-agents are currently orchestration-layer entities, not isolated runtime containers
+  - future runtime-isolated sub-agent execution requires a different runtime architecture.

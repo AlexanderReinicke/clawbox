@@ -20,15 +20,17 @@ Expected: `apiserver is running`.
 
 1. Launch app and verify `AgentManager.sync()` resolves runtime/image/container state.
 2. Build image from bundled `Dockerfile`.
-3. Create/start `claw-agent-1`.
-4. Open embedded terminal and run `whoami`, `pwd`, `openclaw --version`.
-5. Stop/start container and verify persistence.
+3. Select Agent 1 and create/start `claw-agent-1`.
+4. Add Agent 2 slot, select it, create/start `claw-agent-2`.
+5. Open embedded terminal and run `whoami`, `pwd`, `openclaw --version`.
+6. Stop/start selected container and verify persistence.
 
 ## Access folder mount behavior
 
 - Host folder access is provided via bind mount to `/mnt/access`.
 - Mounts are applied only when creating the container.
-- If you change the selected host folder later, recreate the agent container from the app so the new mount is applied.
+- Access folder selection is per agent slot.
+- If you change the selected folder for a slot later, recreate that same agent slot so the new mount is applied.
 
 ## Common failures
 

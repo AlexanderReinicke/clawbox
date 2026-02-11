@@ -11,7 +11,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		DA460EAA2F3CCF2E00FC7DCF /* ClawMarket.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClawMarket.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA460EAA2F3CCF2E00FC7DCF /* ClawNode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClawNode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,7 +45,7 @@
 		DA460EAB2F3CCF2E00FC7DCF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				DA460EAA2F3CCF2E00FC7DCF /* ClawMarket.app */,
+				DA460EAA2F3CCF2E00FC7DCF /* ClawNode.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,8 +72,8 @@
 			packageProductDependencies = (
 				DA460EB92F3CCF9500FC7DCF /* SwiftTerm */,
 			);
-			productName = ClawMarket;
-			productReference = DA460EAA2F3CCF2E00FC7DCF /* ClawMarket.app */;
+			productName = ClawNode;
+			productReference = DA460EAA2F3CCF2E00FC7DCF /* ClawNode.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -269,14 +269,15 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ClawNode;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = cc.local.ClawMarket;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = cc.local.ClawNode;
+				PRODUCT_NAME = ClawNode;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -302,14 +303,15 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ClawNode;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = cc.local.ClawMarket;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = cc.local.ClawNode;
+				PRODUCT_NAME = ClawNode;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

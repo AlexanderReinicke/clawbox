@@ -1,9 +1,9 @@
 import SwiftUI
 
 @main
-struct ClawMarketApp: App {
+struct ClawNodeApp: App {
     var body: some Scene {
-        WindowGroup("ClawMarket") {
+        WindowGroup("ClawNode") {
             RootView()
                 .frame(minWidth: 600, minHeight: 400)
         }

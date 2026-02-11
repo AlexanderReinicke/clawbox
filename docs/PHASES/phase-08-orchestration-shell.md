@@ -107,6 +107,20 @@ Deliver the first concrete implementation pass of the ClawNode orchestration she
 - Added validation for entered names before file/folder creation and renaming.
 - Added success/failure toast feedback for file mutations.
 
+### 4.2 Multi-file editor tabs
+
+- Added multi-tab editing in `FileBrowserScreen`:
+  - open multiple files side-by-side in one editor session
+  - switch active tab without losing in-memory edits
+  - close individual tabs
+  - modified indicator (`●`) per tab
+- Added tab-aware save behavior:
+  - save applies to the active tab only
+  - active tab path is propagated back for breadcrumb/location context
+- Added file-mutation tab coherence:
+  - rename updates matching open tab paths
+  - delete closes affected tabs automatically
+
 ### 5. Runtime support for file editing
 
 Added new `AgentManager` capabilities:

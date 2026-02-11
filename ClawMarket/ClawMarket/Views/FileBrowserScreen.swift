@@ -7,6 +7,19 @@ struct FileBrowserScreen: View {
         let color: Color
     }
 
+    private struct OpenFileTab: Identifiable, Hashable {
+        var path: String
+        var name: String
+        var text: String
+        var savedText: String
+        var isBinary: Bool
+        var isTruncated: Bool
+        var isLoading: Bool
+        var errorMessage: String?
+
+        var id: String { path }
+    }
+
     let manager: AgentManager
     var onBack: (() -> Void)?
     var onLocationChanged: ((String, String?) -> Void)?
@@ -21,14 +34,8 @@ struct FileBrowserScreen: View {
     @State private var isUploading = false
     @State private var isMutating = false
 
-    @State private var selectedFilePath: String?
-    @State private var selectedFileName: String?
-    @State private var preview: AgentFilePreview?
-    @State private var isPreviewLoading = false
-    @State private var previewErrorMessage: String?
-
-    @State private var editorText = ""
-    @State private var savedEditorText = ""
+    @State private var openTabs: [OpenFileTab] = []
+    @State private var activeTabPath: String?
     @State private var isSaving = false
 
     @State private var isCreateFileSheetPresented = false
@@ -90,7 +97,7 @@ struct FileBrowserScreen: View {
         .onChange(of: currentPath) { _, _ in
             emitLocationChange()
         }
-        .onChange(of: selectedFilePath) { _, _ in
+        .onChange(of: activeTabPath) { _, _ in
             emitLocationChange()
         }
         .onDisappear {
@@ -174,7 +181,7 @@ struct FileBrowserScreen: View {
                 Button {
                     handleEntryTap(entry)
                 } label: {
-                    fileRow(entry, isSelected: selectedFilePath == entry.path)
+                    fileRow(entry, isSelected: activeTabPath == entry.path)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -223,18 +230,28 @@ struct FileBrowserScreen: View {
 
     private var editorPane: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if !openTabs.isEmpty {
+                editorTabsBar
+                Divider()
+            }
+
             editorHeader
             Divider()
 
-            if selectedFilePath == nil {
+            if activeTab == nil {
                 emptyEditorState
-            } else if isPreviewLoading {
+            } else if activeTab?.isLoading == true {
                 ProgressView("Loading file...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let previewErrorMessage {
-                errorState(message: previewErrorMessage)
-            } else {
-                TextEditor(text: $editorText)
+            } else if let message = activeTab?.errorMessage {
+                errorState(message: message)
+            } else if let index = activeTabIndex {
+                let textBinding = Binding(
+                    get: { openTabs[index].text },
+                    set: { openTabs[index].text = $0 }
+                )
+
+                TextEditor(text: textBinding)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .scrollContentBackground(.hidden)
                     .background(Color(red: 0.05, green: 0.07, blue: 0.10))
@@ -242,6 +259,8 @@ struct FileBrowserScreen: View {
                     .disabled(isReadOnly)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
+            } else {
+                errorState(message: "Unable to open selected file tab.")
             }
 
             Divider()
@@ -250,10 +269,56 @@ struct FileBrowserScreen: View {
         .background(Color(red: 0.08, green: 0.10, blue: 0.14))
     }
 
+    private var editorTabsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(openTabs) { tab in
+                    let isActive = tab.path == activeTabPath
+                    let isModified = !tab.isBinary && tab.text != tab.savedText
+                    HStack(spacing: 6) {
+                        Button {
+                            activeTabPath = tab.path
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(tab.name)
+                                    .lineLimit(1)
+                                if isModified {
+                                    Text("●")
+                                        .foregroundStyle(Color(red: 0.82, green: 0.63, blue: 0.17))
+                                }
+                            }
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isActive ? .white : Color(red: 0.71, green: 0.75, blue: 0.80))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(isActive ? Color(red: 0.16, green: 0.20, blue: 0.29) : Color(red: 0.10, green: 0.12, blue: 0.18))
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            closeTab(path: tab.path)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color(red: 0.67, green: 0.72, blue: 0.79))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+        }
+        .background(Color(red: 0.10, green: 0.12, blue: 0.17))
+    }
+
     private var editorHeader: some View {
         HStack(spacing: 10) {
-            if let selectedFileName {
-                Text(selectedFileName)
+            if let activeTab {
+                Text(activeTab.name)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
             } else {
@@ -272,6 +337,12 @@ struct FileBrowserScreen: View {
                 Text("Read-only")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(.secondary)
+            }
+
+            if activeTab?.isTruncated == true {
+                Text("Truncated")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.92, green: 0.72, blue: 0.24))
             }
 
             Spacer()
@@ -323,8 +394,8 @@ struct FileBrowserScreen: View {
 
             Spacer()
 
-            if let selectedFilePath {
-                Text(selectedFilePath)
+            if let activeTabPath {
+                Text(activeTabPath)
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
                     .foregroundStyle(Color(red: 0.49, green: 0.54, blue: 0.61))
                     .lineLimit(1)
@@ -460,20 +531,37 @@ struct FileBrowserScreen: View {
         .background(Color(red: 0.05, green: 0.07, blue: 0.10))
     }
 
+    private var activeTabIndex: Int? {
+        guard let activeTabPath else {
+            return nil
+        }
+        return openTabs.firstIndex(where: { $0.path == activeTabPath })
+    }
+
+    private var activeTab: OpenFileTab? {
+        guard let index = activeTabIndex else {
+            return nil
+        }
+        return openTabs[index]
+    }
+
     private var isReadOnly: Bool {
-        preview?.binary == true
+        activeTab?.isBinary == true
     }
 
     private var isModified: Bool {
-        selectedFilePath != nil && !isReadOnly && editorText != savedEditorText
+        guard let activeTab, !activeTab.isBinary else {
+            return false
+        }
+        return activeTab.text != activeTab.savedText
     }
 
     private var canSave: Bool {
-        selectedFilePath != nil && !isReadOnly && isModified && !isSaving && !isMutating
+        activeTab != nil && !isReadOnly && isModified && !isSaving && !isMutating
     }
 
     private var statusSummary: String {
-        if let preview, preview.binary {
+        if activeTab?.isBinary == true {
             return "Binary file (read-only preview)"
         }
         if isSaving {
@@ -482,7 +570,7 @@ struct FileBrowserScreen: View {
         if isModified {
             return "Modified"
         }
-        if selectedFilePath != nil {
+        if activeTab != nil {
             return "Saved"
         }
         return "No file selected"
@@ -494,12 +582,24 @@ struct FileBrowserScreen: View {
             return
         }
 
-        selectedFilePath = entry.path
-        selectedFileName = entry.name
-        preview = nil
-        previewErrorMessage = nil
-        editorText = ""
-        savedEditorText = ""
+        if openTabs.contains(where: { $0.path == entry.path }) {
+            activeTabPath = entry.path
+            return
+        }
+
+        let tab = OpenFileTab(
+            path: entry.path,
+            name: entry.name,
+            text: "",
+            savedText: "",
+            isBinary: false,
+            isTruncated: false,
+            isLoading: true,
+            errorMessage: nil
+        )
+        openTabs.append(tab)
+        activeTabPath = entry.path
+
         Task {
             await loadPreview(path: entry.path)
         }
@@ -515,16 +615,13 @@ struct FileBrowserScreen: View {
 
     private func navigate(to path: String) {
         currentPath = path
-        clearPreviewSelection()
     }
 
-    private func clearPreviewSelection() {
-        selectedFilePath = nil
-        selectedFileName = nil
-        preview = nil
-        previewErrorMessage = nil
-        editorText = ""
-        savedEditorText = ""
+    private func closeTab(path: String) {
+        openTabs.removeAll(where: { $0.path == path })
+        if activeTabPath == path {
+            activeTabPath = openTabs.last?.path
+        }
     }
 
     private func loadCurrentPath() async {
@@ -535,11 +632,6 @@ struct FileBrowserScreen: View {
             currentPath = listing.path
             entries = listing.entries
             listingErrorMessage = nil
-
-            if let selectedFilePath,
-               !entries.contains(where: { $0.path == selectedFilePath }) {
-                clearPreviewSelection()
-            }
         } catch {
             listingErrorMessage = error.localizedDescription
             if !entries.isEmpty {
@@ -549,44 +641,55 @@ struct FileBrowserScreen: View {
     }
 
     private func loadPreview(path: String) async {
-        isPreviewLoading = true
-        defer { isPreviewLoading = false }
+        guard let index = openTabs.firstIndex(where: { $0.path == path }) else {
+            return
+        }
+
+        openTabs[index].isLoading = true
+        openTabs[index].errorMessage = nil
 
         do {
             let preview = try await manager.readFilePreview(path: path)
-            guard selectedFilePath == path else {
+            guard let refreshedIndex = openTabs.firstIndex(where: { $0.path == path }) else {
                 return
             }
-            self.preview = preview
-            self.editorText = preview.text
-            self.savedEditorText = preview.text
-            self.previewErrorMessage = nil
+            openTabs[refreshedIndex].text = preview.text
+            openTabs[refreshedIndex].savedText = preview.text
+            openTabs[refreshedIndex].isBinary = preview.binary
+            openTabs[refreshedIndex].isTruncated = preview.truncated
+            openTabs[refreshedIndex].isLoading = false
+            openTabs[refreshedIndex].errorMessage = nil
         } catch {
-            guard selectedFilePath == path else {
+            guard let refreshedIndex = openTabs.firstIndex(where: { $0.path == path }) else {
                 return
             }
-            self.preview = nil
-            self.editorText = ""
-            self.savedEditorText = ""
-            self.previewErrorMessage = error.localizedDescription
+            openTabs[refreshedIndex].isLoading = false
+            openTabs[refreshedIndex].errorMessage = error.localizedDescription
+            openTabs[refreshedIndex].text = ""
+            openTabs[refreshedIndex].savedText = ""
         }
     }
 
     private func saveCurrentFile(restartAfterSave: Bool) async {
-        guard let selectedFilePath else {
+        guard let index = activeTabIndex else {
             return
         }
         guard canSave else {
             return
         }
 
+        let path = openTabs[index].path
+        let text = openTabs[index].text
+
         isSaving = true
         defer { isSaving = false }
 
         do {
-            try await manager.writeFile(path: selectedFilePath, text: editorText)
-            savedEditorText = editorText
-            presentBanner("Saved \(selectedFilePath)", isError: false)
+            try await manager.writeFile(path: path, text: text)
+            if let refreshedIndex = openTabs.firstIndex(where: { $0.path == path }) {
+                openTabs[refreshedIndex].savedText = text
+            }
+            presentBanner("Saved \(path)", isError: false)
 
             if restartAfterSave {
                 try await manager.restartContainer()
@@ -611,9 +714,15 @@ struct FileBrowserScreen: View {
             try await manager.createFile(path: destinationPath)
             await loadCurrentPath()
             isCreateFileSheetPresented = false
-            selectedFilePath = destinationPath
-            selectedFileName = name
-            await loadPreview(path: destinationPath)
+            handleEntryTap(
+                AgentFileEntry(
+                    name: name,
+                    path: destinationPath,
+                    kind: .file,
+                    size: 0,
+                    modified: Date().timeIntervalSince1970
+                )
+            )
             presentBanner("Created file \(name)", isError: false)
         } catch {
             presentBanner("Create file failed: \(error.localizedDescription)", isError: true)
@@ -660,10 +769,19 @@ struct FileBrowserScreen: View {
             try await manager.renameItem(from: target.path, to: destinationPath)
             renameTarget = nil
 
-            if selectedFilePath == target.path {
-                selectedFilePath = destinationPath
-                selectedFileName = newName
-                await loadPreview(path: destinationPath)
+            for index in openTabs.indices {
+                let path = openTabs[index].path
+                if path == target.path || path.hasPrefix(target.path + "/") {
+                    let suffix = String(path.dropFirst(target.path.count))
+                    let updatedPath = destinationPath + suffix
+                    openTabs[index].path = updatedPath
+                    openTabs[index].name = (updatedPath as NSString).lastPathComponent
+                }
+            }
+
+            if let activeTabPath, activeTabPath == target.path || activeTabPath.hasPrefix(target.path + "/") {
+                let suffix = String(activeTabPath.dropFirst(target.path.count))
+                self.activeTabPath = destinationPath + suffix
             }
 
             await loadCurrentPath()
@@ -681,10 +799,14 @@ struct FileBrowserScreen: View {
             try await manager.deleteItem(path: target.path)
             deleteTarget = nil
 
-            if let selectedFilePath {
-                if selectedFilePath == target.path || selectedFilePath.hasPrefix(target.path + "/") {
-                    clearPreviewSelection()
-                }
+            let removedPaths = Set(
+                openTabs
+                    .map(\.path)
+                    .filter { $0 == target.path || $0.hasPrefix(target.path + "/") }
+            )
+            openTabs.removeAll(where: { removedPaths.contains($0.path) })
+            if let activeTabPath, removedPaths.contains(activeTabPath) {
+                self.activeTabPath = openTabs.last?.path
             }
 
             await loadCurrentPath()
@@ -937,7 +1059,7 @@ struct FileBrowserScreen: View {
     }
 
     private func emitLocationChange() {
-        onLocationChanged?(currentPath, selectedFilePath)
+        onLocationChanged?(currentPath, activeTabPath)
     }
 
     private static let byteCountFormatter: ByteCountFormatter = {

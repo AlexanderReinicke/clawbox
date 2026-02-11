@@ -140,3 +140,16 @@
 - Consequence:
   - navigation remains usable for larger setups without introducing new modal flows.
   - hierarchy visibility is user-controlled and reversible with one click.
+
+## D-014: Keep multi-file editor state in app memory with explicit tab model
+
+- Status: accepted
+- Context: single-file editing forced context switching and made iterative config work slower.
+- Decision:
+  - add an explicit `openTabs` model in `FileBrowserScreen`
+  - track active tab path separately from directory browsing state
+  - preserve unsaved in-memory edits while switching tabs
+  - synchronize tab paths when files are renamed/deleted in-app
+- Consequence:
+  - file editing workflow now supports parallel edits without reopening files repeatedly.
+  - tab lifecycle (close/discard prompts/history) remains intentionally lightweight for now.

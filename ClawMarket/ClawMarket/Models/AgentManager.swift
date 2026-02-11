@@ -22,6 +22,7 @@ enum AgentManagerError: LocalizedError {
     case imageBuildFailed(String)
     case invalidDirectoryListing(String)
     case invalidUploadSource(String)
+    case invalidFilePreview(String)
 
     var errorDescription: String? {
         switch self {
@@ -44,6 +45,8 @@ enum AgentManagerError: LocalizedError {
             return "Failed to read agent filesystem.\n\(message)"
         case let .invalidUploadSource(message):
             return "File upload failed.\n\(message)"
+        case let .invalidFilePreview(message):
+            return "File preview failed.\n\(message)"
         }
     }
 }
@@ -69,6 +72,18 @@ struct AgentFileEntry: Identifiable, Hashable, Codable {
 struct AgentDirectoryListing: Codable {
     let path: String
     let entries: [AgentFileEntry]
+}
+
+struct AgentUploadResult: Hashable {
+    var uploadedFiles: Int
+    var uploadedDirectories: Int
+}
+
+struct AgentFilePreview: Codable {
+    let path: String
+    let text: String
+    let truncated: Bool
+    let binary: Bool
 }
 
 @MainActor
@@ -348,36 +363,108 @@ print(json.dumps(result))
         }
     }
 
-    func uploadFile(from sourceURL: URL, toDirectory directoryPath: String) async throws -> String {
+    func uploadItem(from sourceURL: URL, toDirectory directoryPath: String) async throws -> AgentUploadResult {
+        try await ensureContainerRunningForFileOperations()
+        return try await uploadItemRecursive(from: sourceURL, toDirectory: directoryPath)
+    }
+
+    func readFilePreview(path: String, maxBytes: Int = 256_000) async throws -> AgentFilePreview {
+        try await ensureContainerRunningForFileOperations()
+
+        let previewScript = """
+import json, sys
+path = sys.argv[1]
+max_bytes = int(sys.argv[2])
+try:
+    with open(path, "rb") as handle:
+        data = handle.read(max_bytes + 1)
+except Exception as exc:
+    print(json.dumps({"error": str(exc), "path": path}))
+    raise SystemExit(0)
+
+truncated = len(data) > max_bytes
+if truncated:
+    data = data[:max_bytes]
+
+binary = b"\\x00" in data
+text = data.decode("utf-8", errors="replace")
+print(json.dumps({
+    "path": path,
+    "text": text,
+    "truncated": truncated,
+    "binary": binary
+}))
+"""
+
+        let output = try await shell(
+            ["exec", containerName, "python3", "-c", previewScript, path, String(maxBytes)],
+            timeout: 120
+        )
+
+        let data = Data(output.utf8)
+        let decoder = JSONDecoder()
+
+        struct PreviewError: Decodable {
+            let error: String
+            let path: String
+        }
+
+        if let previewError = try? decoder.decode(PreviewError.self, from: data) {
+            throw AgentManagerError.invalidFilePreview("\(previewError.path): \(previewError.error)")
+        }
+
+        do {
+            return try decoder.decode(AgentFilePreview.self, from: data)
+        } catch {
+            throw AgentManagerError.invalidFilePreview("Unexpected preview output for path \(path).")
+        }
+    }
+
+    private func uploadItemRecursive(from sourceURL: URL, toDirectory directoryPath: String) async throws -> AgentUploadResult {
         guard sourceURL.isFileURL else {
             throw AgentManagerError.invalidUploadSource("Only local files can be uploaded.")
         }
 
-        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
-        if values.isDirectory == true {
-            throw AgentManagerError.invalidUploadSource("Folders are not supported yet: \(sourceURL.lastPathComponent)")
-        }
-        guard values.isRegularFile == true else {
-            throw AgentManagerError.invalidUploadSource("Unsupported file type: \(sourceURL.lastPathComponent)")
-        }
-
-        guard await checkRuntime() else {
-            throw AgentManagerError.runtimeMissing
-        }
-        guard try await containerIsRunning() else {
-            throw AgentManagerError.commandFailed(
-                command: "container exec",
-                exitCode: 1,
-                stderr: "Container \(containerName) is not running."
-            )
-        }
-
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
+        let values = try sourceURL.resourceValues(forKeys: keys)
         let fileName = sourceURL.lastPathComponent
         guard !fileName.isEmpty else {
-            throw AgentManagerError.invalidUploadSource("Could not resolve file name.")
+            throw AgentManagerError.invalidUploadSource("Could not resolve item name for upload.")
+        }
+
+        if values.isSymbolicLink == true {
+            throw AgentManagerError.invalidUploadSource("Symlinks are not supported: \(fileName)")
+        }
+
+        if values.isDirectory == true {
+            let destinationDirectory = (directoryPath as NSString).appendingPathComponent(fileName)
+            try await ensureDirectoryExistsInContainer(path: destinationDirectory)
+
+            var result = AgentUploadResult(uploadedFiles: 0, uploadedDirectories: 1)
+            let fileManager = FileManager.default
+            let children = try fileManager.contentsOfDirectory(
+                at: sourceURL,
+                includingPropertiesForKeys: Array(keys),
+                options: []
+            )
+            for child in children.sorted(by: { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }) {
+                let childResult = try await uploadItemRecursive(from: child, toDirectory: destinationDirectory)
+                result.uploadedFiles += childResult.uploadedFiles
+                result.uploadedDirectories += childResult.uploadedDirectories
+            }
+            return result
+        }
+
+        guard values.isRegularFile == true else {
+            throw AgentManagerError.invalidUploadSource("Unsupported item type: \(fileName)")
         }
 
         let destinationPath = (directoryPath as NSString).appendingPathComponent(fileName)
+        _ = try await uploadFileContents(from: sourceURL, destinationPath: destinationPath)
+        return AgentUploadResult(uploadedFiles: 1, uploadedDirectories: 0)
+    }
+
+    private func uploadFileContents(from sourceURL: URL, destinationPath: String) async throws -> String {
         let uploadScript = """
 import os, sys
 destination = sys.argv[1]
@@ -394,13 +481,35 @@ print(destination)
 """
 
         let timeout = max(120, inferredUploadTimeout(for: sourceURL))
-        let uploadedPath = try await runCommand(
+        return try await runCommand(
             executable: runtimePath,
             args: ["exec", "-i", containerName, "python3", "-c", uploadScript, destinationPath],
             timeout: timeout,
             inputFilePath: sourceURL.path
         )
-        return uploadedPath
+    }
+
+    private func ensureDirectoryExistsInContainer(path: String) async throws {
+        let mkdirScript = """
+import os, sys
+target = sys.argv[1]
+os.makedirs(target, exist_ok=True)
+print(target)
+"""
+        _ = try await shell(["exec", containerName, "python3", "-c", mkdirScript, path], timeout: 60)
+    }
+
+    private func ensureContainerRunningForFileOperations() async throws {
+        guard await checkRuntime() else {
+            throw AgentManagerError.runtimeMissing
+        }
+        guard try await containerIsRunning() else {
+            throw AgentManagerError.commandFailed(
+                command: "container exec",
+                exitCode: 1,
+                stderr: "Container \(containerName) is not running."
+            )
+        }
     }
 
     func resetError() {

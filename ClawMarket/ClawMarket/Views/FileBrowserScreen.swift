@@ -14,6 +14,12 @@ struct FileBrowserScreen: View {
     @State private var isDropTargeted = false
     @State private var isUploading = false
 
+    @State private var selectedFilePath: String?
+    @State private var selectedFileName: String?
+    @State private var preview: AgentFilePreview?
+    @State private var isPreviewLoading = false
+    @State private var previewErrorMessage: String?
+
     init(manager: AgentManager, onBack: (() -> Void)? = nil) {
         self.manager = manager
         self.onBack = onBack
@@ -44,40 +50,10 @@ struct FileBrowserScreen: View {
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ZStack {
-                    List(entries) { entry in
-                        if entry.isDirectory {
-                            Button {
-                                currentPath = entry.path
-                            } label: {
-                                fileRow(entry)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            fileRow(entry)
-                        }
-                    }
-                    .listStyle(.inset)
-
-                    if isDropTargeted {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(.blue.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 8]))
-                            .padding(12)
-                            .transition(.opacity)
-                    }
-
-                    if isUploading {
-                        Color.black.opacity(0.08)
-                            .ignoresSafeArea()
-                        ProgressView("Uploading to \(currentPath)")
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                }
+                contentSplitView
             }
         }
-        .frame(minWidth: 860, minHeight: 560)
+        .frame(minWidth: 980, minHeight: 620)
         .background(Color(NSColor.windowBackgroundColor))
         .overlay(alignment: .bottom) {
             if let banner = activeBanner {
@@ -90,9 +66,116 @@ struct FileBrowserScreen: View {
                     .padding(.bottom, 12)
             }
         }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: handleDroppedItems)
         .task(id: currentPath) {
             await loadCurrentPath()
+        }
+    }
+
+    private var contentSplitView: some View {
+        HSplitView {
+            leftPane
+                .frame(minWidth: 420, idealWidth: 560)
+
+            previewPane
+                .frame(minWidth: 320, idealWidth: 420)
+        }
+    }
+
+    private var leftPane: some View {
+        ZStack {
+            List(entries) { entry in
+                Button {
+                    handleEntryTap(entry)
+                } label: {
+                    fileRow(entry, isSelected: selectedFilePath == entry.path)
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.inset)
+
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.blue.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 8]))
+                    .padding(12)
+                    .transition(.opacity)
+            }
+
+            if isUploading {
+                Color.black.opacity(0.08)
+                    .ignoresSafeArea()
+                ProgressView("Uploading to \(currentPath)")
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted, perform: handleDroppedItems)
+    }
+
+    private var previewPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let selectedFilePath, let selectedFileName {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(selectedFileName)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Text(selectedFilePath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        if let preview, preview.truncated {
+                            Label("Preview truncated", systemImage: "scissors")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        if let preview, preview.binary {
+                            Label("Binary data detected", systemImage: "waveform.path")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+
+                Divider()
+
+                if isPreviewLoading {
+                    ProgressView("Loading file preview...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let previewErrorMessage {
+                    VStack(spacing: 10) {
+                        Image(systemName: "doc.badge.exclamationmark")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.orange)
+                        Text(previewErrorMessage)
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        Text(preview?.text ?? "")
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    }
+                }
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Text("Select a file to preview")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 
@@ -110,7 +193,7 @@ struct FileBrowserScreen: View {
                 Text("Agent Files")
                     .font(.headline)
 
-                Text("Drop files from Finder to upload into this folder")
+                Text("Drop files or folders from Finder to upload into this folder")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -134,7 +217,7 @@ struct FileBrowserScreen: View {
                 HStack(spacing: 6) {
                     ForEach(pathSegments, id: \.path) { segment in
                         Button(segment.label) {
-                            currentPath = segment.path
+                            navigate(to: segment.path)
                         }
                         .buttonStyle(.borderless)
                         .font(.system(.subheadline, design: .monospaced))
@@ -151,7 +234,7 @@ struct FileBrowserScreen: View {
         .padding(.vertical, 12)
     }
 
-    private func fileRow(_ entry: AgentFileEntry) -> some View {
+    private func fileRow(_ entry: AgentFileEntry, isSelected: Bool) -> some View {
         HStack(spacing: 12) {
             Image(systemName: iconName(for: entry.kind))
                 .foregroundStyle(entry.isDirectory ? .blue : .secondary)
@@ -179,17 +262,48 @@ struct FileBrowserScreen: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
+        )
         .contentShape(Rectangle())
+    }
+
+    private func handleEntryTap(_ entry: AgentFileEntry) {
+        if entry.isDirectory {
+            navigate(to: entry.path)
+            return
+        }
+
+        selectedFilePath = entry.path
+        selectedFileName = entry.name
+        preview = nil
+        previewErrorMessage = nil
+        Task {
+            await loadPreview(path: entry.path)
+        }
     }
 
     private func navigateToParent() {
         guard currentPath != "/" else {
             return
         }
-        let nsPath = currentPath as NSString
-        let parent = nsPath.deletingLastPathComponent
-        currentPath = parent.isEmpty ? "/" : parent
+        let parent = (currentPath as NSString).deletingLastPathComponent
+        navigate(to: parent.isEmpty ? "/" : parent)
+    }
+
+    private func navigate(to path: String) {
+        currentPath = path
+        clearPreviewSelection()
+    }
+
+    private func clearPreviewSelection() {
+        selectedFilePath = nil
+        selectedFileName = nil
+        preview = nil
+        previewErrorMessage = nil
     }
 
     private func loadCurrentPath() async {
@@ -200,8 +314,33 @@ struct FileBrowserScreen: View {
             currentPath = listing.path
             entries = listing.entries
             listingErrorMessage = nil
+
+            if let selectedFilePath,
+               !entries.contains(where: { $0.path == selectedFilePath }) {
+                clearPreviewSelection()
+            }
         } catch {
             listingErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func loadPreview(path: String) async {
+        isPreviewLoading = true
+        defer { isPreviewLoading = false }
+
+        do {
+            let preview = try await manager.readFilePreview(path: path)
+            guard selectedFilePath == path else {
+                return
+            }
+            self.preview = preview
+            self.previewErrorMessage = nil
+        } catch {
+            guard selectedFilePath == path else {
+                return
+            }
+            self.preview = nil
+            self.previewErrorMessage = error.localizedDescription
         }
     }
 
@@ -224,12 +363,12 @@ struct FileBrowserScreen: View {
             return false
         }
         Task {
-            await importDroppedFiles(from: accepted)
+            await importDroppedItems(from: accepted)
         }
         return true
     }
 
-    private func importDroppedFiles(from providers: [NSItemProvider]) async {
+    private func importDroppedItems(from providers: [NSItemProvider]) async {
         isUploading = true
         uploadErrorMessage = nil
         uploadStatusMessage = nil
@@ -237,18 +376,20 @@ struct FileBrowserScreen: View {
         let urls = await resolveDroppedURLs(from: providers)
         guard !urls.isEmpty else {
             isUploading = false
-            uploadErrorMessage = "Drop did not include any readable file URLs."
+            uploadErrorMessage = "Drop did not include any readable local URLs."
             return
         }
 
-        var uploadedCount = 0
+        var uploadedFiles = 0
+        var uploadedDirectories = 0
         var failures: [String] = []
 
         for url in urls {
             let hasScopedAccess = url.startAccessingSecurityScopedResource()
             do {
-                _ = try await manager.uploadFile(from: url, toDirectory: currentPath)
-                uploadedCount += 1
+                let result = try await manager.uploadItem(from: url, toDirectory: currentPath)
+                uploadedFiles += result.uploadedFiles
+                uploadedDirectories += result.uploadedDirectories
             } catch {
                 failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -260,9 +401,8 @@ struct FileBrowserScreen: View {
         await loadCurrentPath()
         isUploading = false
 
-        if uploadedCount > 0 {
-            let noun = uploadedCount == 1 ? "file" : "files"
-            uploadStatusMessage = "Uploaded \(uploadedCount) \(noun) to \(currentPath)"
+        if uploadedFiles > 0 || uploadedDirectories > 0 {
+            uploadStatusMessage = uploadSummary(files: uploadedFiles, directories: uploadedDirectories)
         }
         if !failures.isEmpty {
             let first = failures[0]
@@ -270,6 +410,16 @@ struct FileBrowserScreen: View {
                 ? "Upload failed: \(first)"
                 : "Upload failed for \(failures.count) items. First error: \(first)"
         }
+    }
+
+    private func uploadSummary(files: Int, directories: Int) -> String {
+        if files > 0 && directories > 0 {
+            return "Uploaded \(files) file(s) and \(directories) folder(s) to \(currentPath)"
+        }
+        if directories > 0 {
+            return "Uploaded \(directories) folder(s) to \(currentPath)"
+        }
+        return "Uploaded \(files) file(s) to \(currentPath)"
     }
 
     private func resolveDroppedURLs(from providers: [NSItemProvider]) async -> [URL] {

@@ -6,6 +6,7 @@ struct RootView: View {
     @State private var runtimeInstallStatus: RuntimeInstallStatus = .idle
     @State private var setupProgressState: SetupProgressState?
     @State private var isLaunchingTemplate = false
+    @State private var showingTerminal = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -41,7 +42,13 @@ struct RootView: View {
                         isLaunching: isLaunchingTemplate
                     )
                 case .stopped, .starting, .running:
-                    HomeView()
+                    HomeView(
+                        state: manager.state,
+                        onStart: startAgent,
+                        onStop: stopAgent,
+                        onOpenTerminal: { showingTerminal = true },
+                        onRefresh: { Task { await manager.sync() } }
+                    )
                 case let .error(message):
                     ErrorView(message: message) {
                         runtimeInstallStatus = .idle
@@ -52,6 +59,21 @@ struct RootView: View {
         }
         .task {
             await manager.sync()
+        }
+        .task(id: pollingKey) {
+            guard shouldPollAgentState else { return }
+            while !Task.isCancelled && shouldPollAgentState {
+                try? await Task.sleep(for: .seconds(5))
+                if !Task.isCancelled {
+                    await manager.sync()
+                }
+            }
+        }
+        .sheet(isPresented: $showingTerminal) {
+            TerminalScreen(containerName: manager.containerName) {
+                showingTerminal = false
+            }
+            .frame(minWidth: 920, minHeight: 600)
         }
         .animation(.easeInOut(duration: 0.2), value: hasSeenWelcome)
         .animation(.easeInOut(duration: 0.2), value: manager.state)
@@ -128,6 +150,48 @@ struct RootView: View {
                 setupProgressState = .failed(error.localizedDescription)
                 isLaunchingTemplate = false
             }
+        }
+    }
+
+    private func startAgent() {
+        Task {
+            do {
+                try await manager.startContainer()
+                await manager.sync()
+            } catch {
+                manager.state = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private func stopAgent() {
+        Task {
+            do {
+                try await manager.stopContainer()
+                await manager.sync()
+            } catch {
+                manager.state = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private var shouldPollAgentState: Bool {
+        if case .running = manager.state { return true }
+        if case .starting = manager.state { return true }
+        if case .stopped = manager.state { return true }
+        return false
+    }
+
+    private var pollingKey: String {
+        switch manager.state {
+        case .running:
+            return "poll-running"
+        case .starting:
+            return "poll-starting"
+        case .stopped:
+            return "poll-stopped"
+        default:
+            return "poll-off"
         }
     }
 }

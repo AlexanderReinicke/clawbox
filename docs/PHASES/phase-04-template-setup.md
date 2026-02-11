@@ -28,6 +28,10 @@ Implemented first-time environment provisioning flow.
 
 - `xcodebuild` compile success with signing disabled.
 - Flow compiles end-to-end from template selection to setup completion path.
+- Container-level smoke validation:
+  - rebuilt `clawmarket/default:latest`,
+  - created and started `claw-agent-1`,
+  - verified `openclaw --version` works as `agent`.
 
 ## Files
 

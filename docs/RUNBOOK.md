@@ -32,6 +32,10 @@ Expected: `apiserver is running`.
   - Run `container system start`.
 - Node memory OOM in guest:
   - Confirm container memory and `NODE_OPTIONS` are set.
+- `openclaw` missing after image build:
+  - Ensure Dockerfile installs `openclaw` before `USER agent`.
+  - Rebuild image and verify with:
+    - `container exec -i claw-agent-1 /bin/bash -lc 'which openclaw && openclaw --version'`
 
 ## Logs
 

@@ -34,3 +34,10 @@
 - Context: users may not have Apple `container` runtime installed.
 - Decision: add an in-app installer flow (download pkg + admin install + runtime start) with manual fallback.
 - Consequence: first-run UX is simpler, but requires robust error handling around privileged operations.
+
+## D-006: Install OpenClaw before switching to non-root user in Dockerfile
+
+- Status: accepted
+- Context: installing `openclaw` after `USER agent` causes permission errors writing `/usr/local/lib/node_modules`.
+- Decision: run `npm install -g openclaw@2026.2.9` as root, then switch to `agent`.
+- Consequence: image build remains reproducible and `openclaw` is available in `/usr/local/bin` for the runtime user.

@@ -31,6 +31,7 @@ enum AgentManagerError: LocalizedError {
     case invalidUploadSource(String)
     case invalidFilePreview(String)
     case invalidFileWrite(String)
+    case invalidFileMutation(String)
     case dashboardAddressUnavailable(String)
     case keepAwakeControlFailed(String)
 
@@ -59,6 +60,8 @@ enum AgentManagerError: LocalizedError {
             return "File preview failed.\n\(message)"
         case let .invalidFileWrite(message):
             return "File save failed.\n\(message)"
+        case let .invalidFileMutation(message):
+            return "File operation failed.\n\(message)"
         case let .dashboardAddressUnavailable(message):
             return "Dashboard is unavailable.\n\(message)"
         case let .keepAwakeControlFailed(message):
@@ -854,6 +857,121 @@ print(path)
             )
         } catch {
             throw AgentManagerError.invalidFileWrite(error.localizedDescription)
+        }
+    }
+
+    func createFile(path: String, text: String = "") async throws {
+        try await ensureContainerRunningForFileOperations()
+
+        guard let data = text.data(using: .utf8) else {
+            throw AgentManagerError.invalidFileMutation("Could not encode text as UTF-8.")
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clawmarket-create-file-\(UUID().uuidString).tmp")
+        do {
+            try data.write(to: tempURL, options: [.atomic])
+            defer {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+
+            let createScript = """
+import os, sys
+path = sys.argv[1]
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+if os.path.exists(path):
+    raise FileExistsError(path)
+payload = sys.stdin.buffer.read()
+with open(path, "xb") as handle:
+    handle.write(payload)
+print(path)
+"""
+
+            _ = try await runCommand(
+                executable: runtimePath,
+                args: ["exec", "-i", containerName, "python3", "-c", createScript, path],
+                timeout: 180,
+                inputFilePath: tempURL.path
+            )
+        } catch {
+            throw AgentManagerError.invalidFileMutation(error.localizedDescription)
+        }
+    }
+
+    func createDirectory(path: String) async throws {
+        try await ensureContainerRunningForFileOperations()
+
+        let createScript = """
+import os, sys
+target = sys.argv[1]
+if os.path.exists(target):
+    raise FileExistsError(target)
+os.makedirs(target, exist_ok=False)
+print(target)
+"""
+
+        do {
+            _ = try await shell(
+                ["exec", containerName, "python3", "-c", createScript, path],
+                timeout: 90
+            )
+        } catch {
+            throw AgentManagerError.invalidFileMutation(error.localizedDescription)
+        }
+    }
+
+    func renameItem(from sourcePath: String, to destinationPath: String) async throws {
+        try await ensureContainerRunningForFileOperations()
+
+        let renameScript = """
+import os, shutil, sys
+source = sys.argv[1]
+destination = sys.argv[2]
+if not os.path.lexists(source):
+    raise FileNotFoundError(source)
+if os.path.lexists(destination):
+    raise FileExistsError(destination)
+parent = os.path.dirname(destination)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+shutil.move(source, destination)
+print(destination)
+"""
+
+        do {
+            _ = try await shell(
+                ["exec", containerName, "python3", "-c", renameScript, sourcePath, destinationPath],
+                timeout: 120
+            )
+        } catch {
+            throw AgentManagerError.invalidFileMutation(error.localizedDescription)
+        }
+    }
+
+    func deleteItem(path: String) async throws {
+        try await ensureContainerRunningForFileOperations()
+
+        let deleteScript = """
+import os, shutil, sys
+target = sys.argv[1]
+if not os.path.lexists(target):
+    raise FileNotFoundError(target)
+if os.path.isdir(target) and not os.path.islink(target):
+    shutil.rmtree(target)
+else:
+    os.remove(target)
+print(target)
+"""
+
+        do {
+            _ = try await shell(
+                ["exec", containerName, "python3", "-c", deleteScript, path],
+                timeout: 180
+            )
+        } catch {
+            throw AgentManagerError.invalidFileMutation(error.localizedDescription)
         }
     }
 

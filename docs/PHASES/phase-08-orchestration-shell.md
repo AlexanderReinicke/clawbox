@@ -92,12 +92,28 @@ Deliver the first concrete implementation pass of the ClawNode orchestration she
 - Preserved drag-and-drop upload behavior.
 - Added `initialPath` support for `FileBrowserScreen` so sub-agent files open directly at the sub-agent workspace root.
 
+### 4.1 File manager operations (in-app)
+
+- Added in-app file system mutation actions in `FileBrowserScreen`:
+  - `New File`
+  - `New Folder`
+  - `Rename`
+  - `Delete`
+- Added contextual actions via row context menu for files and folders.
+- Added validation for entered names before file/folder creation and renaming.
+- Added success/failure toast feedback for file mutations.
+
 ### 5. Runtime support for file editing
 
 Added new `AgentManager` capabilities:
 - `writeFile(path:text:)`
 - `restartContainer()`
+- `createFile(path:text:)`
+- `createDirectory(path:)`
+- `renameItem(from:to:)`
+- `deleteItem(path:)`
 - New error variant: `invalidFileWrite`
+- New error variant: `invalidFileMutation`
 
 This provides backend support for in-app editing and restart workflow.
 

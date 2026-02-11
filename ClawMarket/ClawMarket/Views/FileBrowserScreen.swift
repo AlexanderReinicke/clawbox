@@ -19,6 +19,7 @@ struct FileBrowserScreen: View {
     @State private var bannerDismissTask: Task<Void, Never>?
     @State private var isDropTargeted = false
     @State private var isUploading = false
+    @State private var isMutating = false
 
     @State private var selectedFilePath: String?
     @State private var selectedFileName: String?
@@ -29,6 +30,14 @@ struct FileBrowserScreen: View {
     @State private var editorText = ""
     @State private var savedEditorText = ""
     @State private var isSaving = false
+
+    @State private var isCreateFileSheetPresented = false
+    @State private var isCreateFolderSheetPresented = false
+    @State private var createFileNameDraft = ""
+    @State private var createFolderNameDraft = ""
+    @State private var renameTarget: AgentFileEntry?
+    @State private var renameNameDraft = ""
+    @State private var deleteTarget: AgentFileEntry?
 
     init(
         manager: AgentManager,
@@ -87,6 +96,66 @@ struct FileBrowserScreen: View {
         .onDisappear {
             dismissBanner()
         }
+        .sheet(isPresented: $isCreateFileSheetPresented) {
+            namePromptSheet(
+                title: "Create File",
+                message: "Create a new file in \(currentPath)",
+                fieldLabel: "File name",
+                fieldText: $createFileNameDraft,
+                actionTitle: "Create",
+                action: {
+                    Task { await createFile() }
+                }
+            )
+        }
+        .sheet(isPresented: $isCreateFolderSheetPresented) {
+            namePromptSheet(
+                title: "Create Folder",
+                message: "Create a new folder in \(currentPath)",
+                fieldLabel: "Folder name",
+                fieldText: $createFolderNameDraft,
+                actionTitle: "Create",
+                action: {
+                    Task { await createFolder() }
+                }
+            )
+        }
+        .sheet(item: $renameTarget) { target in
+            namePromptSheet(
+                title: "Rename",
+                message: "Rename \(target.name)",
+                fieldLabel: "New name",
+                fieldText: $renameNameDraft,
+                actionTitle: "Rename",
+                action: {
+                    Task { await rename(target: target) }
+                }
+            )
+            .onAppear {
+                renameNameDraft = target.name
+            }
+        }
+        .alert(
+            deleteTarget?.isDirectory == true ? "Delete folder?" : "Delete file?",
+            isPresented: Binding(
+                get: { deleteTarget != nil },
+                set: { presented in
+                    if !presented {
+                        deleteTarget = nil
+                    }
+                }
+            ),
+            presenting: deleteTarget
+        ) { target in
+            Button("Delete", role: .destructive) {
+                Task { await delete(target: target) }
+            }
+            Button("Cancel", role: .cancel) {
+                deleteTarget = nil
+            }
+        } message: { target in
+            Text("Delete \(target.name)? This action cannot be undone.")
+        }
     }
 
     private var contentSplitView: some View {
@@ -108,6 +177,28 @@ struct FileBrowserScreen: View {
                     fileRow(entry, isSelected: selectedFilePath == entry.path)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    if entry.isDirectory {
+                        Button("Open Folder") {
+                            navigate(to: entry.path)
+                        }
+                    } else {
+                        Button("Open File") {
+                            handleEntryTap(entry)
+                        }
+                    }
+
+                    Button("Rename…") {
+                        renameNameDraft = entry.name
+                        renameTarget = entry
+                    }
+
+                    Divider()
+
+                    Button("Delete…", role: .destructive) {
+                        deleteTarget = entry
+                    }
+                }
             }
             .listStyle(.inset)
 
@@ -264,6 +355,24 @@ struct FileBrowserScreen: View {
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(Color(red: 0.58, green: 0.62, blue: 0.69))
 
+                Button {
+                    createFileNameDraft = ""
+                    isCreateFileSheetPresented = true
+                } label: {
+                    Label("New File", systemImage: "doc.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isUploading || isMutating)
+
+                Button {
+                    createFolderNameDraft = ""
+                    isCreateFolderSheetPresented = true
+                } label: {
+                    Label("New Folder", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isUploading || isMutating)
+
                 Spacer()
 
                 Button {
@@ -280,6 +389,7 @@ struct FileBrowserScreen: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
+                .disabled(isUploading || isMutating)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -359,7 +469,7 @@ struct FileBrowserScreen: View {
     }
 
     private var canSave: Bool {
-        selectedFilePath != nil && !isReadOnly && isModified && !isSaving
+        selectedFilePath != nil && !isReadOnly && isModified && !isSaving && !isMutating
     }
 
     private var statusSummary: String {
@@ -484,6 +594,103 @@ struct FileBrowserScreen: View {
             }
         } catch {
             presentBanner("Save failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func createFile() async {
+        guard let name = validatedEntryName(createFileNameDraft) else {
+            presentBanner("Invalid file name.", isError: true)
+            return
+        }
+        let destinationPath = (currentPath as NSString).appendingPathComponent(name)
+
+        isMutating = true
+        defer { isMutating = false }
+
+        do {
+            try await manager.createFile(path: destinationPath)
+            await loadCurrentPath()
+            isCreateFileSheetPresented = false
+            selectedFilePath = destinationPath
+            selectedFileName = name
+            await loadPreview(path: destinationPath)
+            presentBanner("Created file \(name)", isError: false)
+        } catch {
+            presentBanner("Create file failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func createFolder() async {
+        guard let name = validatedEntryName(createFolderNameDraft) else {
+            presentBanner("Invalid folder name.", isError: true)
+            return
+        }
+        let destinationPath = (currentPath as NSString).appendingPathComponent(name)
+
+        isMutating = true
+        defer { isMutating = false }
+
+        do {
+            try await manager.createDirectory(path: destinationPath)
+            await loadCurrentPath()
+            isCreateFolderSheetPresented = false
+            presentBanner("Created folder \(name)", isError: false)
+        } catch {
+            presentBanner("Create folder failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func rename(target: AgentFileEntry) async {
+        guard let newName = validatedEntryName(renameNameDraft) else {
+            presentBanner("Invalid target name.", isError: true)
+            return
+        }
+
+        let parentPath = (target.path as NSString).deletingLastPathComponent
+        let destinationPath = (parentPath as NSString).appendingPathComponent(newName)
+        if destinationPath == target.path {
+            renameTarget = nil
+            return
+        }
+
+        isMutating = true
+        defer { isMutating = false }
+
+        do {
+            try await manager.renameItem(from: target.path, to: destinationPath)
+            renameTarget = nil
+
+            if selectedFilePath == target.path {
+                selectedFilePath = destinationPath
+                selectedFileName = newName
+                await loadPreview(path: destinationPath)
+            }
+
+            await loadCurrentPath()
+            presentBanner("Renamed \(target.name) to \(newName)", isError: false)
+        } catch {
+            presentBanner("Rename failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func delete(target: AgentFileEntry) async {
+        isMutating = true
+        defer { isMutating = false }
+
+        do {
+            try await manager.deleteItem(path: target.path)
+            deleteTarget = nil
+
+            if let selectedFilePath {
+                if selectedFilePath == target.path || selectedFilePath.hasPrefix(target.path + "/") {
+                    clearPreviewSelection()
+                }
+            }
+
+            await loadCurrentPath()
+            presentBanner("Deleted \(target.name)", isError: false)
+        } catch {
+            presentBanner("Delete failed: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -636,6 +843,20 @@ struct FileBrowserScreen: View {
         return .secondary
     }
 
+    private func validatedEntryName(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        guard trimmed != "." && trimmed != ".." else {
+            return nil
+        }
+        guard !trimmed.contains("/") else {
+            return nil
+        }
+        return trimmed
+    }
+
     private func relativeTimestamp(for unix: TimeInterval) -> String {
         let date = Date(timeIntervalSince1970: unix)
         let relative = RelativeDateTimeFormatter()
@@ -645,6 +866,50 @@ struct FileBrowserScreen: View {
             return relative.localizedString(for: date, relativeTo: Date())
         }
         return Self.modifiedFormatter.string(from: date)
+    }
+
+    private func namePromptSheet(
+        title: String,
+        message: String,
+        fieldLabel: String,
+        fieldText: Binding<String>,
+        actionTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+
+            Text(message)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            TextField(fieldLabel, text: fieldText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    action()
+                }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    isCreateFileSheetPresented = false
+                    isCreateFolderSheetPresented = false
+                    renameTarget = nil
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(actionTitle) {
+                    action()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(isMutating)
+            }
+        }
+        .padding(18)
+        .frame(minWidth: 420)
     }
 
     private func presentBanner(_ text: String, isError: Bool) {

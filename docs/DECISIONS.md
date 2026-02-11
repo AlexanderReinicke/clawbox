@@ -112,3 +112,19 @@
   - UX gains multi-entity orchestration without multiplying VM instances
   - sub-agents are currently orchestration-layer entities, not isolated runtime containers
   - future runtime-isolated sub-agent execution requires a different runtime architecture.
+
+## D-012: Support direct in-app file mutations via explicit runtime APIs
+
+- Status: accepted
+- Context: file viewing/editing alone was insufficient for operational workflows; users also need lightweight file system management (create, rename, delete) without leaving the app.
+- Decision:
+  - add explicit `AgentManager` APIs for file mutations:
+    - `createFile`
+    - `createDirectory`
+    - `renameItem`
+    - `deleteItem`
+  - surface these actions in `FileBrowserScreen` via header actions and row context menus.
+  - keep validation and feedback in UI (name validation + success/error toasts).
+- Consequence:
+  - the in-app Files tab now covers the primary day-to-day file operations end-to-end.
+  - operation safety is improved by confirmation on delete and deterministic API boundaries in the manager.

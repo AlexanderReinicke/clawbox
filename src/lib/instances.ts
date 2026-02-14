@@ -27,6 +27,7 @@ import {
   removeKeepAwakePreference,
   setKeepAwakePreference
 } from "./instance-preferences";
+import { CliError } from "./errors";
 
 let supportsLabelCache: boolean | null = null;
 
@@ -56,6 +57,24 @@ export function validateInstanceName(name: string): string | null {
     return "Name must contain only letters, numbers, and hyphens.";
   }
   return null;
+}
+
+export function formatInstanceNotFoundMessage(name: string, availableNames: string[]): string {
+  if (availableNames.length === 0) {
+    return `Instance '${name}' not found. No clawbox instances exist yet.`;
+  }
+  return `Instance '${name}' not found. Available instances: ${availableNames.join(", ")}`;
+}
+
+export function requireInstanceByName(instances: InstanceInfo[], name: string): InstanceInfo {
+  const instance = instances.find((item) => item.name === name);
+  if (instance) {
+    return instance;
+  }
+  throw new CliError({
+    kind: "not_found",
+    message: formatInstanceNotFoundMessage(name, instances.map((item) => item.name))
+  });
 }
 
 export async function listManagedInstances(containerBin: string): Promise<InstanceInfo[]> {

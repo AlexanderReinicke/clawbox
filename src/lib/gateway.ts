@@ -3,6 +3,8 @@ import { runCommand } from "./exec";
 
 const GATEWAY_PORT = 18789;
 const GATEWAY_LOG_PATH = "/home/agent/OpenClawProject/logs/gateway.log";
+const GATEWAY_TOKEN_PATH = "/home/agent/.clawbox/gateway-token";
+const TOKEN_MISSING_MESSAGE = "Gateway auth is set to token, but no token is configured.";
 
 export interface GatewayEnsureResult {
   status: "ready" | "pending" | "skipped" | "error";
@@ -39,26 +41,56 @@ export async function ensureOpenClawGateway(
   }
 
   const started = await startGateway(containerBin, internalName);
-  if (!started) {
+  if (started) {
+    const healthyAfterStart = await waitForGatewayHealth(containerBin, internalName, 10_000);
+    if (healthyAfterStart) {
+      return {
+        status: "ready",
+        message: `OpenClaw gateway is ready on ws://127.0.0.1:${GATEWAY_PORT}.`
+      };
+    }
+  }
+
+  const firstLogTail = await readGatewayLogTail(containerBin, internalName);
+  if (isGatewayTokenMissingLog(firstLogTail)) {
+    const token = await ensureGatewayToken(containerBin, internalName);
+    await stopGatewayProcesses(containerBin, internalName);
+    const restarted = await startGateway(containerBin, internalName, token);
+    if (!restarted) {
+      return {
+        status: "error",
+        message: "Failed to launch OpenClaw gateway process with token auth.",
+        detail: await readGatewayLogTail(containerBin, internalName)
+      };
+    }
+
+    const healthyWithToken = await waitForGatewayHealth(containerBin, internalName, 25_000);
+    if (healthyWithToken) {
+      return {
+        status: "ready",
+        message: `OpenClaw gateway is ready on ws://127.0.0.1:${GATEWAY_PORT} (token bootstrap applied).`
+      };
+    }
+
     return {
       status: "error",
-      message: "Failed to launch OpenClaw gateway process.",
+      message: "OpenClaw gateway did not become healthy in time after token bootstrap.",
       detail: await readGatewayLogTail(containerBin, internalName)
     };
   }
 
-  const healthyAfterStart = await waitForGatewayHealth(containerBin, internalName, 25_000);
-  if (healthyAfterStart) {
+  if (!started) {
     return {
-      status: "ready",
-      message: `OpenClaw gateway is ready on ws://127.0.0.1:${GATEWAY_PORT}.`
+      status: "error",
+      message: "Failed to launch OpenClaw gateway process.",
+      detail: firstLogTail
     };
   }
 
   return {
     status: "error",
     message: "OpenClaw gateway did not become healthy in time.",
-    detail: await readGatewayLogTail(containerBin, internalName)
+    detail: firstLogTail
   };
 }
 
@@ -114,14 +146,48 @@ async function stopGatewayProcesses(containerBin: string, internalName: string):
   );
 }
 
-async function startGateway(containerBin: string, internalName: string): Promise<boolean> {
+async function startGateway(containerBin: string, internalName: string, token?: string): Promise<boolean> {
+  const tokenEnvPrefix = token ? `OPENCLAW_GATEWAY_TOKEN=${shellQuote(token)} ` : "";
+  const tokenArg = token ? ` --token ${shellQuote(token)}` : "";
   const start = await execShell(
     containerBin,
     internalName,
-    `nohup openclaw gateway --bind loopback >${shellQuote(GATEWAY_LOG_PATH)} 2>&1 &`,
+    `nohup ${tokenEnvPrefix}openclaw gateway --bind loopback${tokenArg} >${shellQuote(GATEWAY_LOG_PATH)} 2>&1 &`,
     true
   );
   return start.exitCode === 0;
+}
+
+async function ensureGatewayToken(containerBin: string, internalName: string): Promise<string> {
+  const result = await execShell(
+    containerBin,
+    internalName,
+    `
+token_file=${shellQuote(GATEWAY_TOKEN_PATH)}
+token_dir=$(dirname "$token_file")
+mkdir -p "$token_dir"
+chmod 700 "$token_dir" >/dev/null 2>&1 || true
+if [ -s "$token_file" ]; then
+  cat "$token_file"
+  exit 0
+fi
+token=""
+if command -v openssl >/dev/null 2>&1; then
+  token=$(openssl rand -hex 32 2>/dev/null || true)
+fi
+if [ -z "$token" ]; then
+  token=$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' || true)
+fi
+if [ -z "$token" ]; then
+  token=$(date +%s%N)
+fi
+printf "%s" "$token" >"$token_file"
+chmod 600 "$token_file" >/dev/null 2>&1 || true
+printf "%s" "$token"
+`,
+    false
+  );
+  return (result.stdout || "").trim();
 }
 
 async function waitForGatewayHealth(containerBin: string, internalName: string, timeoutMs: number): Promise<boolean> {
@@ -145,6 +211,10 @@ async function readGatewayLogTail(containerBin: string, internalName: string): P
   return log.stdout || log.stderr || "<no log output>";
 }
 
+export function isGatewayTokenMissingLog(logTail: string): boolean {
+  return logTail.includes(TOKEN_MISSING_MESSAGE);
+}
+
 async function ensureGatewayBootstrapWatcher(containerBin: string, internalName: string): Promise<void> {
   const script = `
 pid_file="/tmp/clawbox-gateway-bootstrap.pid"
@@ -159,8 +229,32 @@ nohup /bin/bash -lc '
 for _ in $(seq 1 360); do
   if command -v openclaw >/dev/null 2>&1; then
     mkdir -p /home/agent/OpenClawProject/logs
+    token_file=/home/agent/.clawbox/gateway-token
+    token_dir=$(dirname "$token_file")
+    mkdir -p "$token_dir"
+    chmod 700 "$token_dir" >/dev/null 2>&1 || true
+    if [ -s "$token_file" ]; then
+      token=$(cat "$token_file" 2>/dev/null || true)
+    else
+      token=""
+      if command -v openssl >/dev/null 2>&1; then
+        token=$(openssl rand -hex 32 2>/dev/null || true)
+      fi
+      if [ -z "$token" ]; then
+        token=$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' || true)
+      fi
+      if [ -z "$token" ]; then
+        token=$(date +%s%N)
+      fi
+      printf "%s" "$token" >"$token_file"
+      chmod 600 "$token_file" >/dev/null 2>&1 || true
+    fi
     if ! curl -fsS --max-time 2 http://127.0.0.1:${GATEWAY_PORT} >/dev/null 2>&1; then
-      nohup openclaw gateway --bind loopback >/home/agent/OpenClawProject/logs/gateway.log 2>&1 &
+      if [ -n "$token" ]; then
+        nohup OPENCLAW_GATEWAY_TOKEN="$token" openclaw gateway --bind loopback --token "$token" >/home/agent/OpenClawProject/logs/gateway.log 2>&1 &
+      else
+        nohup openclaw gateway --bind loopback >/home/agent/OpenClawProject/logs/gateway.log 2>&1 &
+      fi
       sleep 2
     fi
     if curl -fsS --max-time 2 http://127.0.0.1:${GATEWAY_PORT} >/dev/null 2>&1; then

@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { listManagedInstances } from "../lib/instances";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
+import { getCommandContext } from "../lib/command-context";
+import { listManagedInstances, requireInstanceByName } from "../lib/instances";
 import { formatGb } from "../lib/utils";
 
 export function registerInspectCommand(program: Command): void {
@@ -8,18 +8,10 @@ export function registerInspectCommand(program: Command): void {
     .command("inspect <name>")
     .description("Show detailed info about an instance")
     .action(async (name: string) => {
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
+      const { containerBin } = await getCommandContext();
 
       const instances = await listManagedInstances(containerBin);
-      const instance = instances.find((item) => item.name === name);
-
-      if (!instance) {
-        const names = instances.map((item) => item.name);
-        throw new Error(names.length > 0
-          ? `Instance '${name}' not found. Available instances: ${names.join(", ")}`
-          : `Instance '${name}' not found. No clawbox instances exist yet.`);
-      }
+      const instance = requireInstanceByName(instances, name);
 
       console.log(`name: ${instance.name}`);
       console.log(`internal name: ${instance.internalName}`);

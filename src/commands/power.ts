@@ -1,9 +1,9 @@
 import inquirer from "inquirer";
 import { Command } from "commander";
-import { listManagedInstances } from "../lib/instances";
+import { getCommandContext } from "../lib/command-context";
+import { listManagedInstances, requireInstanceByName } from "../lib/instances";
 import { setKeepAwakePreference } from "../lib/instance-preferences";
-import { ensurePowerDaemonRunning } from "../lib/power";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
+import { CliError } from "../lib/errors";
 
 interface PowerOptions {
   keepAwake?: boolean;
@@ -18,21 +18,16 @@ export function registerPowerCommand(program: Command): void {
     .option("--allow-sleep", "Allow normal Mac sleep while this VM runs (lower battery use)")
     .action(async (name: string, options: PowerOptions) => {
       if (options.keepAwake && options.allowSleep) {
-        throw new Error("Choose either --keep-awake or --allow-sleep, not both.");
+        throw new CliError({
+          kind: "validation",
+          message: "Choose either --keep-awake or --allow-sleep, not both."
+        });
       }
 
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
-      await ensurePowerDaemonRunning();
+      const { containerBin } = await getCommandContext({ ensurePowerDaemon: true });
 
       const instances = await listManagedInstances(containerBin);
-      const instance = instances.find((item) => item.name === name);
-      if (!instance) {
-        const names = instances.map((item) => item.name);
-        throw new Error(names.length > 0
-          ? `Instance '${name}' not found. Available instances: ${names.join(", ")}`
-          : `Instance '${name}' not found. No clawbox instances exist yet.`);
-      }
+      const instance = requireInstanceByName(instances, name);
 
       const keepAwake = await resolveTargetPolicy(options, instance.keepAwake !== false, name);
       await setKeepAwakePreference(instance.internalName, keepAwake);
@@ -54,7 +49,10 @@ async function resolveTargetPolicy(options: PowerOptions, currentKeepAwake: bool
   }
 
   if (!process.stdout.isTTY) {
-    throw new Error(`Specify --keep-awake or --allow-sleep in non-interactive mode for instance '${name}'.`);
+    throw new CliError({
+      kind: "validation",
+      message: `Specify --keep-awake or --allow-sleep in non-interactive mode for instance '${name}'.`
+    });
   }
 
   const answer = await inquirer.prompt<{ keepAwake: boolean }>([

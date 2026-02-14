@@ -2,7 +2,9 @@ import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 import ora from "ora";
+import { getCommandContext } from "../lib/command-context";
 import { DEFAULT_RAM_GB, RAM_OPTIONS_GB } from "../lib/constants";
+import { CliError } from "../lib/errors";
 import { ensureDefaultImage } from "../lib/image";
 import {
   createManagedInstance,
@@ -13,7 +15,6 @@ import {
   validateInstanceName
 } from "../lib/instances";
 import { evaluateRamPolicy, hostTotalRamGb, ramPolicyError, sumAllocatedRamGb } from "../lib/ram-policy";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
 
 interface CreateOptions {
   ram?: string;
@@ -33,8 +34,7 @@ export function registerCreateCommand(program: Command): void {
     .option("--allow-sleep", "Allow normal Mac sleep while this VM runs (lower battery use)")
     .option("-y, --yes", "Skip confirmation")
     .action(async (providedName: string | undefined, options: CreateOptions) => {
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
+      const { containerBin } = await getCommandContext();
 
       const instances = await listManagedInstances(containerBin);
       const existingContainerNames = await listAllContainerNames(containerBin);
@@ -45,19 +45,28 @@ export function registerCreateCommand(program: Command): void {
       const minimumRamGb = RAM_OPTIONS_GB[0];
       const minimumPolicy = evaluateRamPolicy(totalRamGb, allocatedGb, minimumRamGb);
       if (!minimumPolicy.allowed) {
-        throw new Error(ramPolicyError(minimumPolicy));
+        throw new CliError({
+          kind: "validation",
+          message: ramPolicyError(minimumPolicy)
+        });
       }
 
       const allowedRamOptions = RAM_OPTIONS_GB.filter((ram) => evaluateRamPolicy(totalRamGb, allocatedGb, ram).allowed);
       if (allowedRamOptions.length === 0) {
         const failed = evaluateRamPolicy(totalRamGb, allocatedGb, minimumRamGb);
-        throw new Error(ramPolicyError(failed));
+        throw new CliError({
+          kind: "validation",
+          message: ramPolicyError(failed)
+        });
       }
 
       let selectedRam: number | undefined = parseRamOption(options.ram, minimumRamGb);
       if (typeof selectedRam === "number" && !evaluateRamPolicy(totalRamGb, allocatedGb, selectedRam).allowed) {
         const failed = evaluateRamPolicy(totalRamGb, allocatedGb, selectedRam);
-        throw new Error(ramPolicyError(failed));
+        throw new CliError({
+          kind: "validation",
+          message: ramPolicyError(failed)
+        });
       }
 
       if (typeof selectedRam !== "number") {
@@ -110,12 +119,18 @@ export function registerCreateCommand(program: Command): void {
       }
 
       if (typeof selectedRam !== "number") {
-        throw new Error("Unable to resolve RAM allocation option.");
+        throw new CliError({
+          kind: "validation",
+          message: "Unable to resolve RAM allocation option."
+        });
       }
 
       const policy = evaluateRamPolicy(totalRamGb, allocatedGb, selectedRam);
       if (!policy.allowed) {
-        throw new Error(ramPolicyError(policy));
+        throw new CliError({
+          kind: "validation",
+          message: ramPolicyError(policy)
+        });
       }
 
       let mountPath = options.mount ? ensureMountPathSafe(options.mount) : undefined;
@@ -174,12 +189,18 @@ export function registerCreateCommand(program: Command): void {
       }
 
       if (!name) {
-        throw new Error("Instance name is required. Provide `clawbox create <name>` or run in interactive mode.");
+        throw new CliError({
+          kind: "validation",
+          message: "Instance name is required. Provide `clawbox create <name>` or run in interactive mode."
+        });
       }
 
       const validationMessage = validateInstanceName(name);
       if (validationMessage) {
-        throw new Error(validationMessage);
+        throw new CliError({
+          kind: "validation",
+          message: validationMessage
+        });
       }
       ensureUniqueInstanceName(name, existingContainerNames);
       const keepAwake = await resolveKeepAwakeOption(options);
@@ -196,7 +217,10 @@ export function registerCreateCommand(program: Command): void {
 
       if (!options.yes) {
         if (!process.stdout.isTTY) {
-          throw new Error("Confirmation required. Re-run with --yes in non-interactive mode.");
+          throw new CliError({
+            kind: "validation",
+            message: "Confirmation required. Re-run with --yes in non-interactive mode."
+          });
         }
         const answer = await inquirer.prompt<{ proceed: boolean }>([
           {
@@ -244,17 +268,26 @@ function parseRamOption(input: string | undefined, minimumRamGb: number): number
 
   const numeric = Number(trimmed);
   if (!Number.isInteger(numeric)) {
-    throw new Error("--ram must be an integer.");
+    throw new CliError({
+      kind: "validation",
+      message: "--ram must be an integer."
+    });
   }
   if (numeric < minimumRamGb) {
-    throw new Error(`--ram must be >= ${minimumRamGb}.`);
+    throw new CliError({
+      kind: "validation",
+      message: `--ram must be >= ${minimumRamGb}.`
+    });
   }
   return numeric;
 }
 
 async function resolveKeepAwakeOption(options: CreateOptions): Promise<boolean> {
   if (options.keepAwake && options.allowSleep) {
-    throw new Error("Choose either --keep-awake or --allow-sleep, not both.");
+    throw new CliError({
+      kind: "validation",
+      message: "Choose either --keep-awake or --allow-sleep, not both."
+    });
   }
   if (options.keepAwake) {
     return true;

@@ -1,24 +1,17 @@
 import ora from "ora";
 import { Command } from "commander";
-import { listManagedInstances, pauseManagedInstance } from "../lib/instances";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
+import { getCommandContext } from "../lib/command-context";
+import { listManagedInstances, pauseManagedInstance, requireInstanceByName } from "../lib/instances";
 
 export function registerPauseCommand(program: Command): void {
   program
     .command("pause <name>")
     .description("Pause a running instance")
     .action(async (name: string) => {
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
+      const { containerBin } = await getCommandContext();
 
       const instances = await listManagedInstances(containerBin);
-      const instance = instances.find((item) => item.name === name);
-      if (!instance) {
-        const names = instances.map((item) => item.name);
-        throw new Error(names.length > 0
-          ? `Instance '${name}' not found. Available instances: ${names.join(", ")}`
-          : `Instance '${name}' not found. No clawbox instances exist yet.`);
-      }
+      const instance = requireInstanceByName(instances, name);
 
       if (instance.status !== "running") {
         console.log(`Instance '${name}' is already paused.`);

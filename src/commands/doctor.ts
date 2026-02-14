@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { Command } from "commander";
+import { CliError } from "../lib/errors";
 import { runPreflight } from "../lib/preflight";
 
 export function registerDoctorCommand(program: Command): void {
@@ -29,8 +30,11 @@ export function registerDoctorCommand(program: Command): void {
           console.log("");
           console.log(chalk.yellow("Action required: run the command(s) above, then re-run `clawbox doctor`."));
         }
-        process.exitCode = 1;
-        throw new Error("Preflight failed.");
+        throw new CliError({
+          kind: "dependency",
+          message: "Preflight failed.",
+          hint: "Run the suggested command(s) above, then re-run `clawbox doctor`."
+        });
       }
     });
 }

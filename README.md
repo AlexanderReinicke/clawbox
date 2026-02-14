@@ -82,6 +82,8 @@ openclaw-install
 
 ```bash
 clawbox ui openclaw-main
+# or pick interactively:
+clawbox ui
 ```
 
 Use the localhost URL it prints.
@@ -145,6 +147,7 @@ OpenClaw Control UI is most reliable when accessed through localhost.
 - `http://127.0.0.1:<port>/`
 
 This avoids the typical LAN-IP websocket/auth failures people hit with direct VM IP browsing.
+If you omit a name, `clawbox ui` will let you pick an instance interactively.
 
 ## Power Policy For Long OpenClaw Sessions
 
@@ -191,7 +194,7 @@ clawbox start <name>
 clawbox pause <name>
 clawbox power <name> [--keep-awake|--allow-sleep]
 clawbox shell <name> [--yes] [--new-terminal]
-clawbox ui <name> [--port 18789] [--yes] [--no-open]
+clawbox ui [name] [--port 18789] [--yes] [--no-open]
 clawbox inspect <name>
 clawbox delete <name> [--yes --confirm-name <name>]
 ```
@@ -208,12 +211,14 @@ clawbox doctor
 If Control UI fails:
 - Use `clawbox ui <name>` instead of direct VM LAN IP.
 - Keep the `clawbox ui` process running while using the dashboard.
+- If OpenClaw gateway auth is token-based, `clawbox` now auto-bootstraps a VM-local gateway token and retries startup.
 
 ## Development
 
 ```bash
 npm install
 npm run typecheck
+npm run test
 npm run build
 node dist/cli.js about --once
 ```

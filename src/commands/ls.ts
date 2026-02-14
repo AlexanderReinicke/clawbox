@@ -1,7 +1,7 @@
 import { Command } from "commander";
+import { getCommandContext } from "../lib/command-context";
 import { listManagedInstances } from "../lib/instances";
 import { formatGb } from "../lib/utils";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
 import { renderTable } from "../lib/table";
 
 export function registerLsCommand(program: Command): void {
@@ -9,8 +9,7 @@ export function registerLsCommand(program: Command): void {
     .command("ls")
     .description("List all clawbox instances")
     .action(async () => {
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
+      const { containerBin } = await getCommandContext();
 
       const instances = await listManagedInstances(containerBin);
       if (instances.length === 0) {

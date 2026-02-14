@@ -12,6 +12,7 @@ import { registerShellCommand } from "./commands/shell";
 import { registerStartCommand } from "./commands/start";
 import { registerUiCommand } from "./commands/ui";
 import { CLI_NAME } from "./lib/constants";
+import { renderCliError, toCliError } from "./lib/errors";
 import { readPackageMeta } from "./lib/package";
 import { runPowerDaemonLoop } from "./lib/power";
 
@@ -21,9 +22,9 @@ const normalizedArgv = process.argv.map((arg) => (arg === "-v" ? "--version" : a
 
 if (normalizedArgv[2] === "__powerd") {
   runPowerDaemonLoop().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(chalk.red(message));
-    process.exitCode = 1;
+    const cliError = toCliError(error);
+    console.error(chalk.red(renderCliError(cliError)));
+    process.exitCode = cliError.exitCode;
   });
 } else {
   program
@@ -44,8 +45,8 @@ if (normalizedArgv[2] === "__powerd") {
   registerInspectCommand(program);
 
   program.parseAsync(normalizedArgv).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(chalk.red(message));
-    process.exitCode = 1;
+    const cliError = toCliError(error);
+    console.error(chalk.red(renderCliError(cliError)));
+    process.exitCode = cliError.exitCode;
   });
 }

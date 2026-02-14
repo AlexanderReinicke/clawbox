@@ -1,31 +1,26 @@
 import ora from "ora";
 import { Command } from "commander";
+import { getCommandContext } from "../lib/command-context";
 import { DEFAULT_RAM_GB } from "../lib/constants";
 import { ensureOpenClawGateway, formatGatewayResult } from "../lib/gateway";
 import {
   listManagedInstances,
+  requireInstanceByName,
   startManagedInstance,
   waitForInstanceIp
 } from "../lib/instances";
-import { ensurePowerDaemonRunning } from "../lib/power";
 import { evaluateRamPolicy, hostTotalRamGb, ramPolicyError, sumAllocatedRamGb } from "../lib/ram-policy";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
+import { CliError } from "../lib/errors";
 
 export function registerStartCommand(program: Command): void {
   program
     .command("start <name>")
     .description("Start a paused instance")
     .action(async (name: string) => {
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
-      await ensurePowerDaemonRunning();
+      const { containerBin } = await getCommandContext({ ensurePowerDaemon: true });
 
       const instances = await listManagedInstances(containerBin);
-      const instance = instances.find((item) => item.name === name);
-
-      if (!instance) {
-        throw new Error(instanceNotFoundMessage(name, instances.map((item) => item.name)));
-      }
+      const instance = requireInstanceByName(instances, name);
 
       if (instance.status === "running") {
         console.log(`Instance '${name}' is already running.`);
@@ -45,7 +40,10 @@ export function registerStartCommand(program: Command): void {
       const requestedGb = instance.ramGb ?? DEFAULT_RAM_GB;
       const policy = evaluateRamPolicy(totalRamGb, allocatedRunningGb, requestedGb);
       if (!policy.allowed) {
-        throw new Error(ramPolicyError(policy));
+        throw new CliError({
+          kind: "validation",
+          message: ramPolicyError(policy)
+        });
       }
 
       const spinner = ora(`Starting '${name}'...`).start();
@@ -64,12 +62,4 @@ export function registerStartCommand(program: Command): void {
         throw error;
       }
     });
-}
-
-function instanceNotFoundMessage(name: string, available: string[]): string {
-  if (available.length === 0) {
-    return `Instance '${name}' not found. No clawbox instances exist yet.`;
-  }
-
-  return `Instance '${name}' not found. Available instances: ${available.join(", ")}`;
 }

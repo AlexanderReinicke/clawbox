@@ -1,8 +1,9 @@
 import inquirer from "inquirer";
 import ora from "ora";
 import { Command } from "commander";
-import { deleteManagedInstance, listManagedInstances, pauseManagedInstance } from "../lib/instances";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
+import { getCommandContext } from "../lib/command-context";
+import { CliError } from "../lib/errors";
+import { deleteManagedInstance, listManagedInstances, pauseManagedInstance, requireInstanceByName } from "../lib/instances";
 
 interface DeleteOptions {
   yes?: boolean;
@@ -16,21 +17,17 @@ export function registerDeleteCommand(program: Command): void {
     .option("-y, --yes", "Skip interactive confirmation")
     .option("--confirm-name <name>", "Name confirmation for non-interactive delete")
     .action(async (name: string, options: DeleteOptions) => {
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
+      const { containerBin } = await getCommandContext();
 
       const instances = await listManagedInstances(containerBin);
-      const instance = instances.find((item) => item.name === name);
-      if (!instance) {
-        const names = instances.map((item) => item.name);
-        throw new Error(names.length > 0
-          ? `Instance '${name}' not found. Available instances: ${names.join(", ")}`
-          : `Instance '${name}' not found. No clawbox instances exist yet.`);
-      }
+      const instance = requireInstanceByName(instances, name);
 
       if (!options.yes) {
         if (!process.stdout.isTTY) {
-          throw new Error("Delete confirmation requires TTY. Re-run with --yes --confirm-name <name>.");
+          throw new CliError({
+            kind: "validation",
+            message: "Delete confirmation requires TTY. Re-run with --yes --confirm-name <name>."
+          });
         }
 
         const confirm = await inquirer.prompt<{ proceed: boolean }>([
@@ -55,10 +52,16 @@ export function registerDeleteCommand(program: Command): void {
         ]);
 
         if (typed.typedName !== name) {
-          throw new Error("Confirmation name mismatch. Delete aborted.");
+          throw new CliError({
+            kind: "validation",
+            message: "Confirmation name mismatch. Delete aborted."
+          });
         }
       } else if (options.confirmName !== name) {
-        throw new Error("Non-interactive delete requires --confirm-name to exactly match the instance name.");
+        throw new CliError({
+          kind: "validation",
+          message: "Non-interactive delete requires --confirm-name to exactly match the instance name."
+        });
       }
 
       const spinner = ora(`Deleting '${name}'...`).start();

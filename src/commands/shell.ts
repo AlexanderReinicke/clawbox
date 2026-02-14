@@ -2,13 +2,13 @@ import inquirer from "inquirer";
 import ora from "ora";
 import path from "node:path";
 import { Command } from "commander";
+import { getCommandContext } from "../lib/command-context";
 import { DEFAULT_RAM_GB } from "../lib/constants";
 import { runCommand, runInteractive } from "../lib/exec";
+import { CliError } from "../lib/errors";
 import { ensureOpenClawGateway, formatGatewayResult } from "../lib/gateway";
-import { listManagedInstances, startManagedInstance, waitForInstanceIp } from "../lib/instances";
-import { ensurePowerDaemonRunning } from "../lib/power";
+import { listManagedInstances, requireInstanceByName, startManagedInstance, waitForInstanceIp } from "../lib/instances";
 import { evaluateRamPolicy, hostTotalRamGb, ramPolicyError, sumAllocatedRamGb } from "../lib/ram-policy";
-import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
 
 interface ShellOptions {
   yes?: boolean;
@@ -28,24 +28,19 @@ export function registerShellCommand(program: Command): void {
         return;
       }
 
-      const containerBin = await requireContainerBinary();
-      await ensureRuntimeRunning(containerBin);
-      await ensurePowerDaemonRunning();
+      const { containerBin } = await getCommandContext({ ensurePowerDaemon: true });
 
       const instances = await listManagedInstances(containerBin);
-      const instance = instances.find((item) => item.name === name);
-      if (!instance) {
-        const names = instances.map((item) => item.name);
-        throw new Error(names.length > 0
-          ? `Instance '${name}' not found. Available instances: ${names.join(", ")}`
-          : `Instance '${name}' not found. No clawbox instances exist yet.`);
-      }
+      const instance = requireInstanceByName(instances, name);
 
       if (instance.status !== "running") {
         let shouldStart = Boolean(options.yes);
         if (!options.yes) {
           if (!process.stdout.isTTY) {
-            throw new Error(`Instance '${name}' is paused. Re-run with --yes to auto-start in non-interactive mode.`);
+            throw new CliError({
+              kind: "validation",
+              message: `Instance '${name}' is paused. Re-run with --yes to auto-start in non-interactive mode.`
+            });
           }
           const answer = await inquirer.prompt<{ startNow: boolean }>([
             {
@@ -68,7 +63,10 @@ export function registerShellCommand(program: Command): void {
         const requestedGb = instance.ramGb ?? DEFAULT_RAM_GB;
         const policy = evaluateRamPolicy(totalRamGb, allocatedRunningGb, requestedGb);
         if (!policy.allowed) {
-          throw new Error(ramPolicyError(policy));
+          throw new CliError({
+            kind: "validation",
+            message: ramPolicyError(policy)
+          });
         }
 
         const spinner = ora(`Starting '${name}' before shell attach...`).start();
@@ -96,7 +94,10 @@ export function registerShellCommand(program: Command): void {
 
 async function openInNewTerminal(name: string, yes: boolean): Promise<void> {
   if (process.platform !== "darwin") {
-    throw new Error("--new-terminal is only available on macOS.");
+    throw new CliError({
+      kind: "validation",
+      message: "--new-terminal is only available on macOS."
+    });
   }
 
   const entrypoint = resolveCliEntrypoint();
@@ -115,7 +116,10 @@ async function openInNewTerminal(name: string, yes: boolean): Promise<void> {
 function resolveCliEntrypoint(): string {
   const entrypoint = process.argv[1];
   if (!entrypoint) {
-    throw new Error("Unable to resolve CLI entrypoint for --new-terminal.");
+    throw new CliError({
+      kind: "runtime",
+      message: "Unable to resolve CLI entrypoint for --new-terminal."
+    });
   }
   return path.isAbsolute(entrypoint) ? entrypoint : path.resolve(process.cwd(), entrypoint);
 }

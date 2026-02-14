@@ -1,4 +1,5 @@
 # Node / CLI build outputs
 node_modules/
 dist/
+dist-test/
 *.tgz

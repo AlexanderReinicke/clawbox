@@ -1,3 +1,4 @@
-# Xcode user-specific files
-**/xcuserdata/
-**/*.xcuserstate
+# Node / CLI build outputs
+node_modules/
+dist/
+*.tgz

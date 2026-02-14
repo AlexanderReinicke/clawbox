@@ -1,0 +1,47 @@
+{
+  "name": "clawbox",
+  "version": "0.1.0",
+  "description": "Opinionated CLI wrapper for Apple's container runtime",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/cli.js",
+  "bin": {
+    "clawbox": "bin/clawbox"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "templates",
+    "scripts/install.sh",
+    "README.md"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "commander": "^14.0.1",
+    "inquirer": "^12.9.6",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

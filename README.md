@@ -1,37 +1,73 @@
-# ClawMarket
+# clawbox CLI
 
-ClawMarket is a macOS SwiftUI app that provisions and manages a persistent Linux agent container using Apple's `container` runtime, then exposes an embedded terminal into that container.
+`clawbox` is a TypeScript CLI for managing isolated Linux VM instances through Apple's `container` runtime.
 
-## Current functionality
+## Requirements
 
-- Runtime detection and startup (`container system status/start`).
-- Guided first-run flow:
-  - Welcome
-  - Runtime install (automatic + manual fallback)
-  - Template launch and setup progress
-  - Home controls
-- Container lifecycle management:
-  - image build
-  - container create/start/stop/delete
-  - factory reset
-- Embedded SwiftTerm terminal attached to:
-  - `container exec -i -t claw-agent-1 /bin/bash`
-- Error handling with retry/reset/copy-error.
-- Agent command logging with rotation.
+- macOS 26+ (Darwin 25+), Apple Silicon
+- Apple `container` CLI installed and available on `PATH`
+- Node.js 18+
+- 16 GB host RAM recommended (8 GB host reserve is enforced)
 
-## Project docs
-
-See `docs/README.md` for architecture, decisions, runbook, distribution, and per-phase implementation notes.
-
-## Build
+## Install
 
 ```bash
-cd ClawMarket
-xcodebuild -project ClawMarket.xcodeproj -scheme ClawMarket -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+npm install -g clawbox
+# or
+npx clawbox about
 ```
 
-## Packaging
+GitHub install script:
 
 ```bash
-./packaging/create_dmg.sh /path/to/ClawMarket.app /path/to/ClawMarket.dmg
+curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/scripts/install.sh | bash
+```
+
+## Commands
+
+```bash
+clawbox about
+clawbox doctor
+clawbox create <name> [--ram 4|5|6|<custom>] [--mount /path] [--yes]
+clawbox ls
+clawbox start <name>
+clawbox pause <name>
+clawbox shell <name> [--yes] [--new-terminal]
+clawbox inspect <name>
+clawbox delete <name>
+```
+
+`clawbox about` runs in live mode in interactive terminals. Use `clawbox about --once` for a single snapshot.
+
+`clawbox start` and `clawbox shell` now auto-ensure OpenClaw gateway health when OpenClaw exists in the instance. If OpenClaw is not installed, they continue normally and show a skip notice.
+
+## RAM policy
+
+Before `create` and `start`, clawbox enforces:
+
+`total host RAM - allocated clawbox RAM - requested RAM >= 8 GB`
+
+If the result is below 8 GB, the command is rejected with explicit math.
+
+## Default template
+
+Template Dockerfile lives at `templates/default/Dockerfile` and is built locally on first create.
+
+The v1 template is Debian (Node 22 Bookworm Slim) with common tooling preinstalled:
+
+- bash, curl, wget, git, openssh-client, jq
+- python3 + pip
+- nodejs 22.x + npm
+- nano, vim, htop, ripgrep, fd
+- build-base + cmake
+
+OpenClaw is intentionally **not preinstalled** in this template. An `openclaw-install` helper is included inside instances.
+
+## Development
+
+```bash
+npm install
+npm run build
+npm run typecheck
+node dist/cli.js about
 ```

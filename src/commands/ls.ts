@@ -21,11 +21,12 @@ export function registerLsCommand(program: Command): void {
       const rows = instances.map((instance) => [
         instance.name,
         instance.status,
+        instance.keepAwake === false ? "normal" : "keep-awake",
         instance.ip ?? "-",
         formatGb(instance.ramGb),
         instance.mountPath ?? "-"
       ]);
 
-      console.log(renderTable(["NAME", "STATUS", "IP", "RAM", "MOUNT"], rows));
+      console.log(renderTable(["NAME", "STATUS", "HOST SLEEP", "IP", "RAM", "MOUNT"], rows));
     });
 }

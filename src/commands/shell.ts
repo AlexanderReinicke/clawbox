@@ -6,6 +6,7 @@ import { DEFAULT_RAM_GB } from "../lib/constants";
 import { runCommand, runInteractive } from "../lib/exec";
 import { ensureOpenClawGateway, formatGatewayResult } from "../lib/gateway";
 import { listManagedInstances, startManagedInstance, waitForInstanceIp } from "../lib/instances";
+import { ensurePowerDaemonRunning } from "../lib/power";
 import { evaluateRamPolicy, hostTotalRamGb, ramPolicyError, sumAllocatedRamGb } from "../lib/ram-policy";
 import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
 
@@ -29,6 +30,7 @@ export function registerShellCommand(program: Command): void {
 
       const containerBin = await requireContainerBinary();
       await ensureRuntimeRunning(containerBin);
+      await ensurePowerDaemonRunning();
 
       const instances = await listManagedInstances(containerBin);
       const instance = instances.find((item) => item.name === name);
@@ -81,8 +83,11 @@ export function registerShellCommand(program: Command): void {
       }
 
       const gateway = await ensureOpenClawGateway(containerBin, instance.internalName);
-      console.log(formatGatewayResult(gateway));
+      if (gateway.status === "error") {
+        console.log(formatGatewayResult(gateway));
+      }
 
+      console.log(`Control UI tip: run 'clawbox ui ${name}' from your Mac for localhost-safe access.`);
       const shellPath = await resolvePreferredShell(containerBin, instance.internalName);
       console.log(`Attaching to '${name}'. Use Ctrl+D or 'exit' to return.`);
       await runInteractive(containerBin, ["exec", "-i", "-t", instance.internalName, shellPath]);

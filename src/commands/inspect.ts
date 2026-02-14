@@ -24,6 +24,7 @@ export function registerInspectCommand(program: Command): void {
       console.log(`name: ${instance.name}`);
       console.log(`internal name: ${instance.internalName}`);
       console.log(`status: ${instance.status}`);
+      console.log(`host sleep policy: ${instance.keepAwake === false ? "normal" : "keep-awake (uses more battery)"}`);
       console.log(`ip: ${instance.ip ?? "-"}`);
       console.log(`ram: ${formatGb(instance.ramGb)}`);
       console.log(`mount: ${instance.mountPath ?? "-"}`);

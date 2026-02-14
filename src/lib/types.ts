@@ -4,6 +4,7 @@ export interface InstanceInfo {
   name: string;
   internalName: string;
   status: InstanceStatus;
+  keepAwake?: boolean;
   ip?: string;
   ramGb?: number;
   mountPath?: string;

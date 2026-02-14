@@ -13,6 +13,7 @@ export const INSTANCE_NAME_LABEL = "com.clawbox.instance-name";
 export const INSTANCE_RAM_LABEL = "com.clawbox.ram-gb";
 export const INSTANCE_MOUNT_LABEL = "com.clawbox.mount-path";
 export const INSTANCE_CREATED_AT_LABEL = "com.clawbox.created-at";
+export const INSTANCE_KEEP_AWAKE_LABEL = "com.clawbox.keep-awake";
 
 // macOS 26 (Tahoe) reports Darwin 25.x.
 export const MIN_SUPPORTED_DARWIN_MAJOR = 25;

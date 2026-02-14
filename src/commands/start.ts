@@ -7,6 +7,7 @@ import {
   startManagedInstance,
   waitForInstanceIp
 } from "../lib/instances";
+import { ensurePowerDaemonRunning } from "../lib/power";
 import { evaluateRamPolicy, hostTotalRamGb, ramPolicyError, sumAllocatedRamGb } from "../lib/ram-policy";
 import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
 
@@ -17,6 +18,7 @@ export function registerStartCommand(program: Command): void {
     .action(async (name: string) => {
       const containerBin = await requireContainerBinary();
       await ensureRuntimeRunning(containerBin);
+      await ensurePowerDaemonRunning();
 
       const instances = await listManagedInstances(containerBin);
       const instance = instances.find((item) => item.name === name);
@@ -28,10 +30,13 @@ export function registerStartCommand(program: Command): void {
       if (instance.status === "running") {
         console.log(`Instance '${name}' is already running.`);
         const gateway = await ensureOpenClawGateway(containerBin, instance.internalName);
-        console.log(formatGatewayResult(gateway));
+        if (gateway.status === "error") {
+          console.log(formatGatewayResult(gateway));
+        }
         if (instance.ip) {
           console.log(`IP: ${instance.ip}`);
         }
+        console.log(`Control UI: run 'clawbox ui ${name}' for localhost-safe access from your Mac.`);
         return;
       }
 
@@ -49,8 +54,11 @@ export function registerStartCommand(program: Command): void {
         const ip = await waitForInstanceIp(containerBin, instance.internalName);
         spinner.succeed(`Started '${name}'.`);
         const gateway = await ensureOpenClawGateway(containerBin, instance.internalName);
-        console.log(formatGatewayResult(gateway));
+        if (gateway.status === "error") {
+          console.log(formatGatewayResult(gateway));
+        }
         console.log(`IP: ${ip ?? "pending"}`);
+        console.log(`Control UI: run 'clawbox ui ${name}' for localhost-safe access from your Mac.`);
       } catch (error) {
         spinner.fail("Start failed.");
         throw error;

@@ -4,6 +4,7 @@ import {
   DEFAULT_RAM_GB,
   DEFAULT_TEMPLATE_MOUNT_PATH,
   INSTANCE_CREATED_AT_LABEL,
+  INSTANCE_KEEP_AWAKE_LABEL,
   INSTANCE_MOUNT_LABEL,
   INSTANCE_NAME_LABEL,
   INSTANCE_PREFIX,
@@ -21,6 +22,11 @@ import {
   roundTo,
   normalizeInputPath
 } from "./utils";
+import {
+  readKeepAwakePreferences,
+  removeKeepAwakePreference,
+  setKeepAwakePreference
+} from "./instance-preferences";
 
 let supportsLabelCache: boolean | null = null;
 
@@ -53,6 +59,7 @@ export function validateInstanceName(name: string): string | null {
 }
 
 export async function listManagedInstances(containerBin: string): Promise<InstanceInfo[]> {
+  const keepAwakePreferences = await readKeepAwakePreferences();
   const entries = await listAllContainers(containerBin);
   const managedCandidates = entries
     .map(normalizeListEntry)
@@ -62,7 +69,7 @@ export async function listManagedInstances(containerBin: string): Promise<Instan
   const instances: InstanceInfo[] = [];
   for (const entry of managedCandidates) {
     const inspected = await inspectContainer(containerBin, entry.internalName);
-    instances.push(mergeInstanceData(entry, inspected));
+    instances.push(mergeInstanceData(entry, inspected, keepAwakePreferences));
   }
 
   return instances.sort((a, b) => a.name.localeCompare(b.name));
@@ -90,6 +97,7 @@ export async function createManagedInstance(
     name: string;
     ramGb: number;
     mountPath?: string;
+    keepAwake?: boolean;
     imageTag?: string;
   }
 ): Promise<void> {
@@ -107,6 +115,7 @@ export async function createManagedInstance(
       [MANAGED_LABEL, "true"],
       [INSTANCE_NAME_LABEL, options.name],
       [INSTANCE_RAM_LABEL, String(options.ramGb)],
+      [INSTANCE_KEEP_AWAKE_LABEL, options.keepAwake === false ? "false" : "true"],
       [INSTANCE_CREATED_AT_LABEL, new Date().toISOString()]
     ];
     if (options.mountPath) {
@@ -120,6 +129,7 @@ export async function createManagedInstance(
 
   args.push(imageTag, "sleep", "infinity");
   await runCommand(containerBin, args, { timeoutMs: 120_000 });
+  await setKeepAwakePreference(internalName, options.keepAwake !== false);
 }
 
 export async function startManagedInstance(containerBin: string, internalName: string): Promise<void> {
@@ -132,6 +142,7 @@ export async function pauseManagedInstance(containerBin: string, internalName: s
 
 export async function deleteManagedInstance(containerBin: string, internalName: string): Promise<void> {
   await runCommand(containerBin, ["rm", internalName], { timeoutMs: 60_000 });
+  await removeKeepAwakePreference(internalName);
 }
 
 export async function waitForInstanceIp(
@@ -318,7 +329,11 @@ async function inspectContainer(containerBin: string, internalName: string): Pro
   };
 }
 
-function mergeInstanceData(listEntry: NormalizedListEntry, inspected: InspectedDetails): InstanceInfo {
+function mergeInstanceData(
+  listEntry: NormalizedListEntry,
+  inspected: InspectedDetails,
+  keepAwakePreferences: Record<string, boolean>
+): InstanceInfo {
   const mergedLabels = {
     ...listEntry.labels,
     ...inspected.labels
@@ -330,17 +345,35 @@ function mergeInstanceData(listEntry: NormalizedListEntry, inspected: InspectedD
 
   const ramFromLabel = parseMaybeNumber(mergedLabels[INSTANCE_RAM_LABEL]);
   const mountFromLabel = mergedLabels[INSTANCE_MOUNT_LABEL];
+  const keepAwake = parseLabelBoolean(mergedLabels[INSTANCE_KEEP_AWAKE_LABEL]);
+  const keepAwakeFromPreference = keepAwakePreferences[internalName];
 
   return {
     name,
     internalName,
     status: inspected.status ?? listEntry.status,
+    keepAwake: keepAwakeFromPreference ?? keepAwake ?? true,
     ip: inspected.ip ?? listEntry.ip,
     ramGb: inspected.ramGb ?? listEntry.ramGb ?? ramFromLabel ?? DEFAULT_RAM_GB,
     mountPath: inspected.mountPath ?? mountFromLabel,
     createdAt: inspected.createdAt,
     startedAt: inspected.startedAt ?? listEntry.startedAt
   };
+}
+
+function parseLabelBoolean(value?: string): boolean | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
 }
 
 function extractMountPath(root: Record<string, unknown>): string | undefined {

@@ -18,6 +18,8 @@ import { ensureRuntimeRunning, requireContainerBinary } from "../lib/runtime";
 interface CreateOptions {
   ram?: string;
   mount?: string;
+  keepAwake?: boolean;
+  allowSleep?: boolean;
   yes?: boolean;
 }
 
@@ -27,6 +29,8 @@ export function registerCreateCommand(program: Command): void {
     .description("Create a new VM instance")
     .option("--ram <gb>", "RAM allocation in GB (4, 5, 6, or custom >=4)")
     .option("--mount <path>", "Host folder to mount to /mnt/host")
+    .option("--keep-awake", "Prevent Mac idle sleep while this VM is running (uses more battery)")
+    .option("--allow-sleep", "Allow normal Mac sleep while this VM runs (lower battery use)")
     .option("-y, --yes", "Skip confirmation")
     .action(async (providedName: string | undefined, options: CreateOptions) => {
       const containerBin = await requireContainerBinary();
@@ -178,11 +182,14 @@ export function registerCreateCommand(program: Command): void {
         throw new Error(validationMessage);
       }
       ensureUniqueInstanceName(name, existingContainerNames);
+      const keepAwake = await resolveKeepAwakeOption(options);
 
       console.log(chalk.cyan("Create summary"));
       console.log(`  Name: ${name}`);
       console.log(`  RAM: ${selectedRam} GB`);
       console.log(`  Mount: ${mountPath ?? "none"}`);
+      console.log(`  Host sleep policy: ${keepAwake ? "keep awake while running (uses more battery)" : "normal sleep allowed"}`);
+      console.log(`  Change later: clawbox power ${name} --keep-awake|--allow-sleep`);
       console.log(`  Host total RAM: ${policy.totalGb} GB`);
       console.log(`  Currently allocated: ${policy.allocatedGb} GB`);
       console.log(`  Remaining after create: ${policy.remainingGb} GB`);
@@ -212,7 +219,8 @@ export function registerCreateCommand(program: Command): void {
         await createManagedInstance(containerBin, {
           name,
           ramGb: selectedRam,
-          mountPath
+          mountPath,
+          keepAwake
         });
         spinner.succeed(`Created instance '${name}'.`);
       } catch (error) {
@@ -242,4 +250,30 @@ function parseRamOption(input: string | undefined, minimumRamGb: number): number
     throw new Error(`--ram must be >= ${minimumRamGb}.`);
   }
   return numeric;
+}
+
+async function resolveKeepAwakeOption(options: CreateOptions): Promise<boolean> {
+  if (options.keepAwake && options.allowSleep) {
+    throw new Error("Choose either --keep-awake or --allow-sleep, not both.");
+  }
+  if (options.keepAwake) {
+    return true;
+  }
+  if (options.allowSleep) {
+    return false;
+  }
+
+  if (!process.stdout.isTTY) {
+    return true;
+  }
+
+  const answer = await inquirer.prompt<{ keepAwake: boolean }>([
+    {
+      type: "confirm",
+      name: "keepAwake",
+      message: "Keep this VM consistently active by preventing Mac idle sleep while it runs? (uses more battery)",
+      default: true
+    }
+  ]);
+  return answer.keepAwake;
 }

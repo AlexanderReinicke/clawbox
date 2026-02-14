@@ -28,18 +28,28 @@ curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/scripts/install.s
 ```bash
 clawbox about
 clawbox doctor
-clawbox create <name> [--ram 4|5|6|<custom>] [--mount /path] [--yes]
+clawbox create <name> [--ram 4|5|6|<custom>] [--mount /path] [--keep-awake|--allow-sleep] [--yes]
 clawbox ls
 clawbox start <name>
 clawbox pause <name>
+clawbox power <name> [--keep-awake|--allow-sleep]
 clawbox shell <name> [--yes] [--new-terminal]
+clawbox ui <name> [--port 18789] [--yes] [--no-open]
 clawbox inspect <name>
 clawbox delete <name>
 ```
 
 `clawbox about` runs in live mode in interactive terminals. Use `clawbox about --once` for a single snapshot.
 
-`clawbox start` and `clawbox shell` now auto-ensure OpenClaw gateway health when OpenClaw exists in the instance. If OpenClaw is not installed, they continue normally and show a skip notice.
+`clawbox start` and `clawbox shell` auto-ensure OpenClaw gateway health. If OpenClaw is not installed yet, clawbox arms a background bootstrap watcher that starts gateway automatically right after OpenClaw is installed.
+
+`clawbox ui` is the recommended way to open OpenClaw Control UI from your Mac. It binds a local proxy on `127.0.0.1` to avoid Control UI websocket/auth failures that can happen when browsing the VM LAN IP directly. Keep the `clawbox ui` command running while using the dashboard.
+
+During `clawbox create`, clawbox asks whether that VM should keep your Mac awake while the VM is running. Enabling this improves long-running reliability, but uses more battery. This can also be set non-interactively with `--keep-awake` or `--allow-sleep`.
+
+You can change this later per VM:
+
+`clawbox power <name> --allow-sleep` or `clawbox power <name> --keep-awake`
 
 ## RAM policy
 

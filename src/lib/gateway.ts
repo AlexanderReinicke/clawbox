@@ -5,7 +5,7 @@ const GATEWAY_PORT = 18789;
 const GATEWAY_LOG_PATH = "/home/agent/OpenClawProject/logs/gateway.log";
 
 export interface GatewayEnsureResult {
-  status: "ready" | "skipped" | "error";
+  status: "ready" | "pending" | "skipped" | "error";
   message: string;
   detail?: string;
 }
@@ -16,9 +16,10 @@ export async function ensureOpenClawGateway(
 ): Promise<GatewayEnsureResult> {
   const hasOpenClaw = await commandExists(containerBin, internalName, "openclaw");
   if (!hasOpenClaw) {
+    await ensureGatewayBootstrapWatcher(containerBin, internalName);
     return {
-      status: "skipped",
-      message: "OpenClaw not installed in this instance; skipped gateway management."
+      status: "pending",
+      message: "OpenClaw not installed yet. Gateway bootstrap watcher is armed and will auto-start after install."
     };
   }
 
@@ -64,6 +65,9 @@ export async function ensureOpenClawGateway(
 export function formatGatewayResult(result: GatewayEnsureResult): string {
   if (result.status === "ready") {
     return chalk.green(result.message);
+  }
+  if (result.status === "pending") {
+    return chalk.cyan(result.message);
   }
   if (result.status === "skipped") {
     return chalk.yellow(result.message);
@@ -139,6 +143,38 @@ async function readGatewayLogTail(containerBin: string, internalName: string): P
     true
   );
   return log.stdout || log.stderr || "<no log output>";
+}
+
+async function ensureGatewayBootstrapWatcher(containerBin: string, internalName: string): Promise<void> {
+  const script = `
+pid_file="/tmp/clawbox-gateway-bootstrap.pid"
+if [ -f "$pid_file" ]; then
+  pid=$(cat "$pid_file" 2>/dev/null || true)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    exit 0
+  fi
+fi
+
+nohup /bin/bash -lc '
+for _ in $(seq 1 360); do
+  if command -v openclaw >/dev/null 2>&1; then
+    mkdir -p /home/agent/OpenClawProject/logs
+    if ! curl -fsS --max-time 2 http://127.0.0.1:${GATEWAY_PORT} >/dev/null 2>&1; then
+      nohup openclaw gateway --bind loopback >/home/agent/OpenClawProject/logs/gateway.log 2>&1 &
+      sleep 2
+    fi
+    if curl -fsS --max-time 2 http://127.0.0.1:${GATEWAY_PORT} >/dev/null 2>&1; then
+      exit 0
+    fi
+  fi
+  sleep 5
+done
+exit 0
+' >/tmp/clawbox-gateway-bootstrap.log 2>&1 &
+echo $! > "$pid_file"
+`;
+
+  await execShell(containerBin, internalName, script, true);
 }
 
 async function execShell(

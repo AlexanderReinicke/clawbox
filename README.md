@@ -46,7 +46,7 @@ Best practice:
 ## Install
 
 ```bash
-npm install -g clawbox
+npm install -g clawbox-package
 ```
 
 ## OpenClaw Safe Start (5 Minutes)
@@ -85,6 +85,20 @@ clawbox ui openclaw-main
 ```
 
 Use the localhost URL it prints.
+
+## Live Preview GIFs
+
+### Safe Start
+
+![OpenClaw safe start workflow](assets/previews/openclaw-safe-start.gif)
+
+### Daily Session
+
+![OpenClaw daily session workflow](assets/previews/openclaw-daily-session.gif)
+
+### Power Policy
+
+![OpenClaw power policy workflow](assets/previews/openclaw-power-policy.gif)
 
 ## Workflow Blocks
 

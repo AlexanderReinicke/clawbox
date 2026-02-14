@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_NAME="clawbox"
+PACKAGE_NAME="clawbox-package"
 PACKAGE_SPEC="${1:-${PACKAGE_NAME}@latest}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
